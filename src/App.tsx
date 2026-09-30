@@ -11,7 +11,6 @@ import { SellingActivitiesView } from './components/SellingActivitiesView';
 import { JerseyRecordsView } from './components/JerseyRecordsView';
 import { AuditLogView } from './components/AuditLogView';
 import { AdminLoginModal } from './components/AdminLoginModal';
-import { GoogleSheetsModal } from './components/GoogleSheetsModal';
 import { ReportsModal } from './components/ReportsModal';
 import { RecordFormModal } from './components/RecordFormModal';
 import { SellingFormModal } from './components/SellingFormModal';
@@ -23,7 +22,6 @@ import {
   SellingActivityRecord, 
   JerseyRecord, 
   AuditLog, 
-  GoogleSheetsConfig, 
   CategoryKey, 
   DocumentAttachment 
 } from './types/transparency';
@@ -36,26 +34,15 @@ import {
   saveJerseyRecords, 
   getAuditLogs, 
   addAuditLog, 
-  getSheetsConfig, 
-  saveSheetsConfig, 
-  getAdminAuth, 
-  setAdminAuth,
-  resetToInitialData 
+  subscribeToData
 } from './services/storage';
-import { syncFromGoogleSheet } from './services/googleSheets';
-import { initAuth } from './firebase';
-import { 
-  ShieldCheck, 
-  FileSpreadsheet, 
-  CheckCircle2, 
-  RotateCcw, 
-  Info,
-  ExternalLink 
-} from 'lucide-react';
+import { auth } from './firebase';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { CheckCircle2 } from 'lucide-react';
 
 export default function App() {
   // Session & Auth state
-  const [isAdmin, setIsAdmin] = useState<boolean>(() => getAdminAuth());
+  const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
 
   // App dataset state
@@ -63,15 +50,12 @@ export default function App() {
   const [sellingRecords, setSellingRecords] = useState<SellingActivityRecord[]>(() => getSellingRecords());
   const [jerseyRecords, setJerseyRecords] = useState<JerseyRecord[]>(() => getJerseyRecords());
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => getAuditLogs());
-  const [sheetsConfig, setSheetsConfig] = useState<GoogleSheetsConfig>(() => getSheetsConfig());
 
   // Active navigation tab
   const [activeTab, setActiveTab] = useState<string>('main');
 
   // Modals
-  const [isSheetsModalOpen, setIsSheetsModalOpen] = useState(false);
   const [isReportsModalOpen, setIsReportsModalOpen] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
 
   // Record Form Modal state
   const [isRecordModalOpen, setIsRecordModalOpen] = useState(false);
@@ -106,63 +90,21 @@ export default function App() {
     setSellingRecords(getSellingRecords());
     setJerseyRecords(getJerseyRecords());
     setAuditLogs(getAuditLogs());
-    setSheetsConfig(getSheetsConfig());
   }, []);
 
-  // Listen to Firebase Auth for Google Sign In session
+  // Stay signed in as administrator while a Firebase admin session exists
   useEffect(() => {
-    const unsubscribe = initAuth(
-      (user) => {
-        // Authenticated with Google Workspace OAuth
-        setIsAdmin(true);
-        setAdminAuth(true);
-      },
-      () => {
-        // Auth state checked
-      }
-    );
-    return () => {
-      if (typeof unsubscribe === 'function') unsubscribe();
-    };
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setIsAdmin(!!user);
+    });
+    return () => unsubscribe();
   }, []);
 
-  // Automatic Background Google Sheets Sync
+  // Show new records from the shared database as soon as they arrive
   useEffect(() => {
-    if (!sheetsConfig.spreadsheetId || !sheetsConfig.autoSyncEnabled) return;
-
-    const intervalMinutes = sheetsConfig.syncIntervalMinutes || 2;
-    const intervalMs = intervalMinutes * 60 * 1000;
-
-    const intervalId = setInterval(async () => {
-      try {
-        const result = await syncFromGoogleSheet(sheetsConfig.spreadsheetId);
-        if (result.success) {
-          reloadData();
-        }
-      } catch (err) {
-        console.warn('Auto-sync cycle error:', err);
-      }
-    }, intervalMs);
-
-    return () => clearInterval(intervalId);
-  }, [sheetsConfig.spreadsheetId, sheetsConfig.autoSyncEnabled, sheetsConfig.syncIntervalMinutes, reloadData]);
-
-  // Quick Manual Sync from Navbar
-  const handleQuickSync = async () => {
-    if (!sheetsConfig.spreadsheetId) {
-      setIsSheetsModalOpen(true);
-      return;
-    }
-    setIsSyncing(true);
-    const res = await syncFromGoogleSheet(sheetsConfig.spreadsheetId);
-    setIsSyncing(false);
-    if (res.success) {
-      reloadData();
-      showToast(res.message);
-    } else {
-      showToast(`Sync Failed: ${res.message}`);
-    }
-  };
+    reloadData();
+    return subscribeToData(reloadData);
+  }, [reloadData]);
 
   // Admin Login / Logout
   const handleLoginSuccess = () => {
@@ -171,7 +113,7 @@ export default function App() {
   };
 
   const handleLogout = () => {
-    setAdminAuth(false);
+    signOut(auth).catch(() => {});
     setIsAdmin(false);
     showToast('Logged out. Switched to Batch Member View-Only mode.');
   };
@@ -403,15 +345,6 @@ export default function App() {
     setViewingDocTitle(title);
   };
 
-  // Restore sample data
-  const handleResetSampleData = () => {
-    if (window.confirm('Reset all records to initial sample batch data? This will overwrite local edits.')) {
-      resetToInitialData();
-      reloadData();
-      showToast('Sample data restored.');
-    }
-  };
-
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col antialiased selection:bg-emerald-500 selection:text-white">
       {/* Toast notification */}
@@ -429,11 +362,7 @@ export default function App() {
         onLogout={handleLogout}
         activeTab={activeTab}
         setActiveTab={setActiveTab}
-        sheetsConfig={sheetsConfig}
-        onOpenSheetsModal={() => setIsSheetsModalOpen(true)}
         onOpenReportsModal={() => setIsReportsModalOpen(true)}
-        onQuickSync={handleQuickSync}
-        isSyncing={isSyncing}
       />
 
       {/* Main Content Area */}
@@ -612,32 +541,11 @@ export default function App() {
 
           <div className="flex items-center gap-4">
             <button
-              onClick={() => setIsSheetsModalOpen(true)}
-              className="inline-flex items-center gap-1 hover:text-emerald-600 transition-colors"
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-500" />
-              <span>Google Sheets Sync</span>
-            </button>
-            <span>•</span>
-            <button
               onClick={() => setIsReportsModalOpen(true)}
               className="hover:text-emerald-600 transition-colors"
             >
               Financial Statement
             </button>
-            {isAdmin && (
-              <>
-                <span>•</span>
-                <button
-                  onClick={handleResetSampleData}
-                  className="inline-flex items-center gap-1 hover:text-rose-500 transition-colors"
-                  title="Reset sample data"
-                >
-                  <RotateCcw className="w-3 h-3" />
-                  <span>Restore Sample Data</span>
-                </button>
-              </>
-            )}
           </div>
         </div>
       </footer>
@@ -647,14 +555,6 @@ export default function App() {
         isOpen={isLoginModalOpen}
         onClose={() => setIsLoginModalOpen(false)}
         onLoginSuccess={handleLoginSuccess}
-      />
-
-      <GoogleSheetsModal
-        isOpen={isSheetsModalOpen}
-        onClose={() => setIsSheetsModalOpen(false)}
-        config={sheetsConfig}
-        onConfigUpdated={(updated) => setSheetsConfig(updated)}
-        onDataRefreshed={reloadData}
       />
 
       <ReportsModal
