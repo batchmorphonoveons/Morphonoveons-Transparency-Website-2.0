@@ -10,6 +10,23 @@
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
   </head>
+  <script>
+  window.addEventListener('error', function (e) {
+    var msg = (e.target && e.target.src)
+      ? 'Failed to load: ' + e.target.src
+      : e.message + '\n' + (e.filename || '') + ':' + (e.lineno || '');
+    var box = document.createElement('pre');
+    box.style.cssText = 'color:#b91c1c;padding:16px;white-space:pre-wrap;font-size:14px';
+    box.textContent = msg;
+    (document.body || document.documentElement).prepend(box);
+  }, true);
+  window.addEventListener('unhandledrejection', function (e) {
+    var box = document.createElement('pre');
+    box.style.cssText = 'color:#b91c1c;padding:16px;white-space:pre-wrap;font-size:14px';
+    box.textContent = String(e.reason);
+    (document.body || document.documentElement).prepend(box);
+  });
+</script>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
