@@ -1,0 +1,6 @@
+{
+  "name": "Morphonoveons Batch 2026 Transparency Portal",
+  "description": "A centralized transparency portal for Batch 2026 to track collections, expenses, selling activities, jersey funds, and audit logs with live Google Sheets integration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
