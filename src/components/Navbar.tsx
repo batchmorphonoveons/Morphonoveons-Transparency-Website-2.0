@@ -86,7 +86,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
               <span>
                 {sheetsConfig?.spreadsheetId  
-                  ? sheetsConfig.lastSyncStatus === 'success' 
+                 ? sheetsConfig?.lastSyncStatus === 'success'
                     ? 'Sheets: Connected' 
                     : 'Sheets: Attention'
                   : 'Sheets: Setup Sync'}
