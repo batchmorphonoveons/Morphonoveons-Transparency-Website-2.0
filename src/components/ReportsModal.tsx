@@ -196,45 +196,39 @@ export const ReportsModal: React.FC<ReportsModalProps> = ({
             </div>
           </div>
 
-          {/* Individual Category Details */}
+                   {/* Individual Category Details */}
           <div className="space-y-4">
             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
               2. Transparency Audit Certification
             </h3>
             <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-              This financial report has been compiled and cross-referenced with all batch collection slips, bank receipts, official supplier invoices, and Google Sheets logs. Funds are segregated into dedicated accounts to ensure zero fund mixing.
+              This financial report has been compiled and cross-referenced with all batch collection slips, bank receipts, and official supplier invoices. Funds are segregated into dedicated accounts to ensure zero fund mixing.
             </p>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-6 pt-6 mt-6 border-t border-slate-200 dark:border-slate-800 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 pt-6 mt-6 border-t border-slate-200 dark:border-slate-800 text-xs">
               <div>
-               <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 pt-6 mt-6 border-t border-slate-200 dark:border-slate-800 text-xs">
-  <div>
-    <div className="h-8"></div>
-    <div className="border-b border-slate-400 pb-1 mb-1 font-bold text-slate-900 dark:text-white text-center">
-      Stacy Salvador A. Mallorca
-    </div>
-    <div className="font-semibold text-slate-800 dark:text-slate-200 text-center">Batch Treasurer</div>
-    <div className="text-[11px] text-slate-500 text-center">Prepared &amp; Recorded</div>
-  </div>
-  <div>
-    <div className="h-8"></div>
-    <div className="border-b border-slate-400 pb-1 mb-1 font-bold text-slate-900 dark:text-white text-center">
-      Jan Ramonelle B. Rabeje
-    </div>
-    <div className="font-semibold text-slate-800 dark:text-slate-200 text-center">Batch Auditor</div>
-    <div className="text-[11px] text-slate-500 text-center">Audited &amp; Verified</div>
-  </div>
-  <div>
-    <div className="h-8"></div>
-    <div className="border-b border-slate-400 pb-1 mb-1 font-bold text-slate-900 dark:text-white text-center">
-      Cee-jay Zyre B. Manzano
-    </div>
-    <div className="font-semibold text-slate-800 dark:text-slate-200 text-center">Batch President</div>
-    <div className="text-[11px] text-slate-500 text-center">Confirmed &amp; Published</div>
-  </div>
-</div>
+                <div className="h-8"></div>
+                <div className="border-b border-slate-400 pb-1 mb-1 font-bold text-slate-900 dark:text-white text-center">
+                  Stacy Salvador A. Mallorca
                 </div>
-                <div className="text-[11px] text-slate-500">Confirmed & Published</div>
+                <div className="font-semibold text-slate-800 dark:text-slate-200 text-center">Batch Treasurer</div>
+                <div className="text-[11px] text-slate-500 text-center">Prepared &amp; Recorded</div>
+              </div>
+              <div>
+                <div className="h-8"></div>
+                <div className="border-b border-slate-400 pb-1 mb-1 font-bold text-slate-900 dark:text-white text-center">
+                  Jan Ramonelle B. Rabeje
+                </div>
+                <div className="font-semibold text-slate-800 dark:text-slate-200 text-center">Batch Auditor</div>
+                <div className="text-[11px] text-slate-500 text-center">Audited &amp; Verified</div>
+              </div>
+              <div>
+                <div className="h-8"></div>
+                <div className="border-b border-slate-400 pb-1 mb-1 font-bold text-slate-900 dark:text-white text-center">
+                  Cee-jay Zyre B. Manzano
+                </div>
+                <div className="font-semibold text-slate-800 dark:text-slate-200 text-center">Batch President</div>
+                <div className="text-[11px] text-slate-500 text-center">Confirmed &amp; Published</div>
               </div>
             </div>
           </div>
