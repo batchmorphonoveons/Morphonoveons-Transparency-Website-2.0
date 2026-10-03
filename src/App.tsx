@@ -485,8 +485,8 @@ export default function App() {
         {activeTab === 'mol_blue' && (
           <JerseyRecordsView
             jerseyType="mol_blue"
-            title="MOL Blue Jersey Fund"
-            subtitle="MOL Blue Department sports jersey fees, player orders, and apparel manufacturer payments"
+            title="MOL Blue & MMC White Jersey Fund"
+            subtitle="Combined MOL Blue and MMC White sports jersey fees, orders, and apparel manufacturer payments"
             themeColor="blue"
             isAdmin={isAdmin}
             jerseyRecords={jerseyRecords}
@@ -505,38 +505,6 @@ export default function App() {
             onEditJersey={(rec) => {
               setJerseyToEdit(rec);
               setDefaultJerseyType('mol_blue');
-              setIsJerseyModalOpen(true);
-            }}
-            onDeleteJersey={handleDeleteJersey}
-            onQuickUpdateStatus={handleQuickUpdateJerseyStatus}
-            onQuickUpdateSupplier={handleQuickUpdateJerseySupplier}
-            onViewDocument={handleViewDocument}
-          />
-        )}
-
-        {activeTab === 'mmc_white' && (
-          <JerseyRecordsView
-            jerseyType="mmc_white"
-            title="MMC White Jersey Fund"
-            subtitle="MMC White Department sports jersey fees, participant orders, and fabrication disbursements"
-            themeColor="teal"
-            isAdmin={isAdmin}
-            jerseyRecords={jerseyRecords}
-            financialRecords={financialRecords}
-            onOpenAddOrder={() => {
-              setJerseyToEdit(null);
-              setDefaultJerseyType('mmc_white');
-              setIsJerseyModalOpen(true);
-            }}
-            onOpenAddFinancial={(type) => {
-              setDefaultCategory('mmc_white');
-              setDefaultType(type);
-              setRecordToEdit(null);
-              setIsRecordModalOpen(true);
-            }}
-            onEditJersey={(rec) => {
-              setJerseyToEdit(rec);
-              setDefaultJerseyType('mmc_white');
               setIsJerseyModalOpen(true);
             }}
             onDeleteJersey={handleDeleteJersey}
