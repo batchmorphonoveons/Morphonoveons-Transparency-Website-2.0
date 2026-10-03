@@ -380,30 +380,6 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
             </div>
           </div>
 
-          {/* 5. Total MMC White Jersey Collections */}
-          <div 
-            onClick={() => onSelectCategory('mmc_white')}
-            className="cursor-pointer group p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 hover:border-teal-500/50 shadow-sm transition-all hover:shadow-md"
-          >
-            <div className="flex items-center justify-between mb-3">
-              <div className="w-10 h-10 rounded-xl bg-teal-50 dark:bg-teal-950/60 text-teal-600 dark:text-teal-400 flex items-center justify-center">
-                <Shirt className="w-5 h-5 text-teal-600" />
-              </div>
-              <span className="text-[11px] font-semibold text-teal-600 dark:text-teal-400 group-hover:translate-x-0.5 transition-transform flex items-center gap-0.5">
-                View MMC White <ArrowUpRight className="w-3.5 h-3.5" />
-              </span>
-            </div>
-            <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-              Total MMC White Collections
-            </div>
-            <div className="text-2xl font-black text-slate-900 dark:text-white mt-1 font-mono">
-              ₱{totalMmcWhiteCollections.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-            </div>
-            <div className="text-[11px] text-slate-400 dark:text-slate-500 mt-2">
-              Disbursed: ₱{totalMmcWhiteExpenses.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-            </div>
-          </div>
-
           {/* 6. Total Expenses */}
           <div className="p-5 bg-rose-50/50 dark:bg-rose-950/20 rounded-2xl border border-rose-200 dark:border-rose-900/50 shadow-sm">
             <div className="flex items-center justify-between mb-3">
@@ -456,7 +432,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
         <h3 className="text-sm font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
           Individual Category Portals
         </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
              {Object.values(CATEGORIES).filter((c) => c.key !== 'mmc_white').map((c) => (
             <button
               key={cat.key}
