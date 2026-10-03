@@ -21,7 +21,7 @@ interface SellingActivitiesViewProps {
   onOpenAdd: () => void;
   onEdit: (record: SellingActivityRecord) => void;
   onDelete: (id: string, record: SellingActivityRecord) => void;
-  onViewDocument: (doc: DocumentAttachment, title: string) => void;
+      onViewDocument: (doc: DocumentAttachment, title: string, docs?: DocumentAttachment[]) => void;
 }
 
 export const SellingActivitiesView: React.FC<SellingActivitiesViewProps> = ({
