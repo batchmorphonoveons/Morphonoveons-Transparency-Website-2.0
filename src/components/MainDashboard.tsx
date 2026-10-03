@@ -508,7 +508,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
                 className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-700 dark:text-slate-200 outline-none"
               >
                 <option value="all">All Categories</option>
-                {Object.values(CATEGORIES).map((c) => (
+               {Object.values(CATEGORIES).filter((cat) => cat.key !== 'mmc_white').map((cat) => (
                   <option key={c.key} value={c.key}>{c.shortLabel}</option>
                 ))}
               </select>
