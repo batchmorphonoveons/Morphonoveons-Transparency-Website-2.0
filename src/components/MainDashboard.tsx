@@ -85,19 +85,15 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
       .reduce((sum, r) => sum + r.amount, 0);
   }, [financialRecords]);
 
-  // 4. Total MOL Blue Jersey Collections
+   // 4. Total MOL Blue & MMC White Jersey Collections (combined)
   const totalMolBlueCollections = useMemo(() => {
     return financialRecords
-      .filter((r) => r.category === 'mol_blue' && r.type === 'collection')
+      .filter((r) => (r.category === 'mol_blue' || r.category === 'mmc_white') && r.type === 'collection')
       .reduce((sum, r) => sum + r.amount, 0);
   }, [financialRecords]);
 
-  // 5. Total MMC White Jersey Collections
-  const totalMmcWhiteCollections = useMemo(() => {
-    return financialRecords
-      .filter((r) => r.category === 'mmc_white' && r.type === 'collection')
-      .reduce((sum, r) => sum + r.amount, 0);
-  }, [financialRecords]);
+  // MMC White is now counted inside MOL Blue
+  const totalMmcWhiteCollections = 0;
 
   // Total Expenses across all funds
   const totalGeneralExpenses = useMemo(() => {
@@ -116,17 +112,13 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
       .reduce((sum, r) => sum + r.amount, 0);
   }, [financialRecords]);
 
-  const totalMolBlueExpenses = useMemo(() => {
+   const totalMolBlueExpenses = useMemo(() => {
     return financialRecords
-      .filter((r) => r.category === 'mol_blue' && r.type === 'expense')
+      .filter((r) => (r.category === 'mol_blue' || r.category === 'mmc_white') && r.type === 'expense')
       .reduce((sum, r) => sum + r.amount, 0);
   }, [financialRecords]);
 
-  const totalMmcWhiteExpenses = useMemo(() => {
-    return financialRecords
-      .filter((r) => r.category === 'mmc_white' && r.type === 'expense')
-      .reduce((sum, r) => sum + r.amount, 0);
-  }, [financialRecords]);
+  const totalMmcWhiteExpenses = 0;
 
   const totalExpenses = 
     totalGeneralExpenses + 
@@ -366,11 +358,11 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
                 <Shirt className="w-5 h-5 text-blue-600" />
               </div>
               <span className="text-[11px] font-semibold text-blue-600 dark:text-blue-400 group-hover:translate-x-0.5 transition-transform flex items-center gap-0.5">
-                View MOL Blue <ArrowUpRight className="w-3.5 h-3.5" />
+                View MOL BLUE & MMC WHITE Jersey Fund <ArrowUpRight className="w-3.5 h-3.5" />
               </span>
             </div>
             <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-              Total MOL Blue Collections
+              Total MOL Blue & MMC White Collections.
             </div>
             <div className="text-2xl font-black text-slate-900 dark:text-white mt-1 font-mono">
               ₱{totalMolBlueCollections.toLocaleString('en-US', { minimumFractionDigits: 2 })}
