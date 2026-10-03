@@ -75,6 +75,7 @@ export default function App() {
   // Document Viewer Modal state
   const [viewingDoc, setViewingDoc] = useState<DocumentAttachment | null>(null);
   const [viewingDocTitle, setViewingDocTitle] = useState<string>('');
+  const [viewingDocs, setViewingDocs] = useState<DocumentAttachment[]>([]);
 
   // Toast / notification feedback
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -340,10 +341,32 @@ export default function App() {
   };
 
   // Open Document Viewer
-  const handleViewDocument = (doc: DocumentAttachment, title: string) => {
-    setViewingDoc(doc);
-    setViewingDocTitle(title);
-  };
+     const handleViewDocument = (
+     doc: DocumentAttachment,
+     title: string,
+     docs?: DocumentAttachment[]
+   ) => {
+     let siblings: DocumentAttachment[] = docs && docs.length > 0 ? docs : [doc];
+
+     if (!docs || docs.length === 0) {
+       const allRecords: any[] = [...financialRecords, ...sellingRecords, ...jerseyRecords];
+       outer: for (const rec of allRecords) {
+         for (const value of Object.values(rec)) {
+           if (
+             Array.isArray(value) &&
+             value.some((d: any) => d && typeof d === 'object' && d.name === doc.name && d.dataUrl === doc.dataUrl)
+           ) {
+             siblings = value as DocumentAttachment[];
+             break outer;
+           }
+         }
+       }
+     }
+
+     setViewingDocs(siblings);
+     setViewingDoc(doc);
+     setViewingDocTitle(title);
+   };
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col antialiased selection:bg-emerald-500 selection:text-white">
@@ -601,14 +624,16 @@ export default function App() {
         onDelete={handleDeleteJersey}
       />
 
-      <DocumentViewerModal
-        document={viewingDoc}
-        recordTitle={viewingDocTitle}
-        onClose={() => {
-          setViewingDoc(null);
-          setViewingDocTitle('');
-        }}
-      />
+         <DocumentViewerModal
+     document={viewingDoc}
+     documents={viewingDocs}
+     recordTitle={viewingDocTitle}
+     onClose={() => {
+       setViewingDoc(null);
+       setViewingDocs([]);
+       setViewingDocTitle('');
+     }}
+   />
     </div>
   );
 }
