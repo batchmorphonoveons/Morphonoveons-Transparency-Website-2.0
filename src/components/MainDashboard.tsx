@@ -457,7 +457,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
           Individual Category Portals
         </h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-          {Object.values(CATEGORIES).map((cat) => (
+             {Object.values(CATEGORIES).filter((c) => c.key !== 'mmc_white').map((c) => (
             <button
               key={cat.key}
               onClick={() => onSelectCategory(cat.key)}
