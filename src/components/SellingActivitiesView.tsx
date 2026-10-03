@@ -218,7 +218,7 @@ export const SellingActivitiesView: React.FC<SellingActivitiesViewProps> = ({
                     <td className="py-3 px-4 text-center whitespace-nowrap">
                       {r.documents && r.documents.length > 0 ? (
                         <button
-                          onClick={() => onViewDocument(r.documents[0], r.title)}
+                         onClick={() => onViewDocument(r.documents[0], r.title, r.documents)}
                           className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 hover:bg-amber-50 text-slate-700 dark:text-slate-300 hover:text-amber-600 text-[11px] border border-slate-200 dark:border-slate-700"
                         >
                           <Paperclip className="w-3 h-3 text-amber-500" />
