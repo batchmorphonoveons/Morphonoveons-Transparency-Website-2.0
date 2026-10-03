@@ -45,9 +45,9 @@ export const CATEGORIES: Record<CategoryKey, CategoryMeta> = {
   },
   mol_blue: {
     key: 'mol_blue',
-    label: 'MOL Blue Jersey',
-    shortLabel: 'MOL Blue Jersey',
-    description: 'MOL Blue Department sports jersey orders and fabrication costs.',
+        label: 'MOL Blue & MMC White Jersey',
+    shortLabel: 'MOL Blue & MMC White',
+    description: 'Combined MOL Blue and MMC White sports jersey orders and fabrication costs.',
     color: 'blue',
     bgLight: 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300',
     borderColor: 'border-blue-500',
