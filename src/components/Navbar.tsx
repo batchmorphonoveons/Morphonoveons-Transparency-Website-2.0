@@ -52,8 +52,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     { id: 'general', label: 'General Batch Funds', icon: Coins },
     { id: 'selling', label: 'Selling Activities', icon: ShoppingBag },
     { id: 'batch_jersey', label: 'Batch Jersey', icon: Shirt },
-    { id: 'mol_blue', label: 'MOL Blue Jersey', icon: Shirt },
-    { id: 'mmc_white', label: 'MMC White Jersey', icon: Shirt },
+    { id: 'mol_blue', label: 'MOL Blue & MMC White Jersey', icon: Shirt },
     { id: 'audit_log', label: 'Audit Log', icon: History },
   ];
 
