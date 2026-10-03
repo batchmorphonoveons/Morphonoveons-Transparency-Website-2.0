@@ -151,8 +151,8 @@ export const JerseyFormModal: React.FC<JerseyFormModalProps> = ({
                 className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-800 dark:text-slate-200"
               >
                 <option value="batch_jersey">Batch Official Jersey</option>
-                <option value="mol_blue">MOL Blue Jersey</option>
-                <option value="mmc_white">MMC White Jersey</option>
+                <option value="batch_jersey">Batch Official Jersey</option>
+                <option value="mol_blue">MOL Blue & MMC White Jersey</option>
               </select>
             </div>
 
