@@ -174,7 +174,7 @@ export const RecordFormModal: React.FC<RecordFormModalProps> = ({
                 onChange={(e) => setCategory(e.target.value as CategoryKey)}
                 className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-800 dark:text-slate-200 outline-none focus:ring-2 focus:ring-emerald-500"
               >
-                {Object.values(CATEGORIES).map((cat) => (
+                {Object.values(CATEGORIES).filter((cat) => cat.key !== 'mmc_white').map((cat) => (
                   <option key={cat.key} value={cat.key}>
                     {cat.label}
                   </option>
