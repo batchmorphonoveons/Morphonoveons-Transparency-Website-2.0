@@ -120,18 +120,16 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
 
   const totalMmcWhiteExpenses = 0;
 
-  const totalExpenses = 
-    totalGeneralExpenses + 
-    totalSellingCosts + 
-    totalBatchJerseyExpenses + 
-    totalMolBlueExpenses + 
-    totalMmcWhiteExpenses;
+     const totalExpenses = 
+     totalGeneralExpenses + 
+     totalSellingCosts + 
+     totalBatchJerseyExpenses;
 
   // Total Inflows
-  const totalInflows = 
-    totalGeneralCollections + 
-    totalSellingRevenue + 
-    totalBatchJerseyCollections + 
+      const totalInflows = 
+     totalGeneralCollections + 
+     totalSellingRevenue + 
+     totalBatchJerseyCollections;
     totalMolBlueCollections + 
     totalMmcWhiteCollections;
 
