@@ -62,21 +62,23 @@ export const JerseyRecordsView: React.FC<JerseyRecordsViewProps> = ({
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [supplierFilter, setSupplierFilter] = useState<string>('all');
 
-  // Filter jersey records for this type
+    // Filter jersey records for this type
   const currentJerseyOrders = useMemo(() => {
-        return jerseyRecords.filter((r) =>
+    return jerseyRecords.filter((r) =>
       jerseyType === 'mol_blue'
         ? r.jerseyType === 'mol_blue' || r.jerseyType === 'mmc_white'
         : r.jerseyType === jerseyType
     );
+  }, [jerseyRecords, jerseyType]);
 
   // Filter financial records for this jersey category
   const currentFinRecords = useMemo(() => {
-       return financialRecords.filter((r) =>
+    return financialRecords.filter((r) =>
       jerseyType === 'mol_blue'
         ? r.category === 'mol_blue' || r.category === 'mmc_white'
         : r.category === jerseyType
     );
+  }, [financialRecords, jerseyType]);
 
   // Overall financial calculations
   const totalCollections = useMemo(() => {
