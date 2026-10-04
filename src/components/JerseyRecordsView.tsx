@@ -34,6 +34,8 @@ interface JerseyRecordsViewProps {
   onDeleteJersey: (id: string, record: JerseyRecord) => void;
   onQuickUpdateStatus: (id: string, newStatus: 'Paid' | 'Partially Paid' | 'Unpaid') => void;
   onQuickUpdateSupplier: (id: string, newStatus: 'Completed' | 'Pending') => void;
+  onEditFinancial: (record: FinancialRecord) => void;
+  onDeleteFinancial: (id: string, record: FinancialRecord) => void;
   onViewDocument: (doc: DocumentAttachment, title: string) => void;
 }
 
@@ -51,6 +53,8 @@ export const JerseyRecordsView: React.FC<JerseyRecordsViewProps> = ({
   onDeleteJersey,
   onQuickUpdateStatus,
   onQuickUpdateSupplier,
+  onEditFinancial,
+  onDeleteFinancial,
   onViewDocument,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -60,13 +64,19 @@ export const JerseyRecordsView: React.FC<JerseyRecordsViewProps> = ({
 
   // Filter jersey records for this type
   const currentJerseyOrders = useMemo(() => {
-    return jerseyRecords.filter((r) => r.jerseyType === jerseyType);
-  }, [jerseyRecords, jerseyType]);
+        return jerseyRecords.filter((r) =>
+      jerseyType === 'mol_blue'
+        ? r.jerseyType === 'mol_blue' || r.jerseyType === 'mmc_white'
+        : r.jerseyType === jerseyType
+    );
 
   // Filter financial records for this jersey category
   const currentFinRecords = useMemo(() => {
-    return financialRecords.filter((r) => r.category === jerseyType);
-  }, [financialRecords, jerseyType]);
+       return financialRecords.filter((r) =>
+      jerseyType === 'mol_blue'
+        ? r.category === 'mol_blue' || r.category === 'mmc_white'
+        : r.category === jerseyType
+    );
 
   // Overall financial calculations
   const totalCollections = useMemo(() => {
@@ -367,6 +377,77 @@ export const JerseyRecordsView: React.FC<JerseyRecordsViewProps> = ({
                 <tr>
                   <td colSpan={isAdmin ? 10 : 9} className="py-8 text-center text-slate-500 text-xs">
                     No jersey records found for this filter.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+   
+      {/* Payment & Disbursement Records */}
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+        <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/20">
+          <h3 className="text-sm font-bold text-slate-900 dark:text-white">Batch Payments & Supplier Disbursements</h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400">Records that feed the totals above</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs text-left">
+            <thead className="bg-slate-100/75 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold border-b border-slate-200 dark:border-slate-700">
+              <tr>
+                <th className="py-3 px-4">Date</th>
+                <th className="py-3 px-4">Type</th>
+                <th className="py-3 px-4">Description</th>
+                <th className="py-3 px-4">Source / Payee</th>
+                <th className="py-3 px-4 text-right">Amount</th>
+                {isAdmin && <th className="py-3 px-4 text-right">Admin Actions</th>}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+              {currentFinRecords.length > 0 ? (
+                currentFinRecords.map((rec) => (
+                  <tr key={rec.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                    <td className="py-3 px-4 whitespace-nowrap text-slate-600 dark:text-slate-400">{rec.date}</td>
+                    <td className="py-3 px-4 whitespace-nowrap">
+                      <span className={rec.type === 'collection' ? 'text-emerald-600 font-semibold' : 'text-rose-600 font-semibold'}>
+                        {rec.type === 'collection' ? 'Payment received' : 'Supplier disbursement'}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4 font-semibold text-slate-900 dark:text-white">{rec.title}</td>
+                    <td className="py-3 px-4 text-slate-700 dark:text-slate-300">{rec.sourceOrPayee}</td>
+                    <td className="py-3 px-4 text-right font-mono font-bold">
+                      <span className={rec.type === 'collection' ? 'text-emerald-600' : 'text-rose-600'}>
+                        {rec.type === 'collection' ? '+' : '-'}₱{rec.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                      </span>
+                    </td>
+                    {isAdmin && (
+                      <td className="py-3 px-4 text-right whitespace-nowrap">
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            onClick={() => onEditFinancial(rec)}
+                            className="p-1.5 text-slate-400 hover:text-indigo-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+                            title="Edit"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (window.confirm('Delete this record?')) onDeleteFinancial(rec.id, rec);
+                            }}
+                            className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+                            title="Delete"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={isAdmin ? 6 : 5} className="py-8 text-center text-slate-500 text-xs">
+                    No payment or disbursement records yet.
                   </td>
                 </tr>
               )}
