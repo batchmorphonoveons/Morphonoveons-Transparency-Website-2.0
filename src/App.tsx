@@ -478,6 +478,11 @@ export default function App() {
             onDeleteJersey={handleDeleteJersey}
             onQuickUpdateStatus={handleQuickUpdateJerseyStatus}
             onQuickUpdateSupplier={handleQuickUpdateJerseySupplier}
+                        onEditFinancial={(rec) => {
+              setRecordToEdit(rec);
+              setIsRecordModalOpen(true);
+            }}
+            onDeleteFinancial={handleDeleteFinancialRecord}
             onViewDocument={handleViewDocument}
           />
         )}
@@ -510,6 +515,11 @@ export default function App() {
             onDeleteJersey={handleDeleteJersey}
             onQuickUpdateStatus={handleQuickUpdateJerseyStatus}
             onQuickUpdateSupplier={handleQuickUpdateJerseySupplier}
+                        onEditFinancial={(rec) => {
+              setRecordToEdit(rec);
+              setIsRecordModalOpen(true);
+            }}
+            onDeleteFinancial={handleDeleteFinancialRecord}
             onViewDocument={handleViewDocument}
           />
         )}
