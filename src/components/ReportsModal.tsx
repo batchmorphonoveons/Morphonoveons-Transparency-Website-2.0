@@ -58,8 +58,12 @@ export const ReportsModal: React.FC<ReportsModalProps> = ({
     .filter(r => r.category === 'mmc_white' && r.type === 'expense')
     .reduce((sum, r) => sum + r.amount, 0);
 
-    const totalCollectionsAll = generalColl + sellingGross + batchJerseyColl;
-   const totalExpensesAll = generalExp + sellingCosts + batchJerseyExp;
+  const totalCollectionsAll =
+    generalColl + sellingGross + batchJerseyColl + molBlueColl + mmcWhiteColl;
+  const totalExpensesAll =
+    generalExp + sellingCosts + batchJerseyExp + molBlueExp + mmcWhiteExp;
+  const availableBalanceTotal = totalCollectionsAll - totalExpensesAll;
+
   const handlePrint = () => {
     window.print();
   };
