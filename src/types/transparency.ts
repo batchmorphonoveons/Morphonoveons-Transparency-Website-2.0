@@ -110,6 +110,7 @@ export interface JerseyRecord {
   id: string;
   jerseyType: 'batch_jersey' | 'mol_blue' | 'mmc_white';
   memberRef: string; // E.g. "BM-2026-012" or "Section B #14" - NO IMAGINARY NAMES
+  section?: string;
   jerseyNumber?: string;
   jerseySize: 'XS' | 'S' | 'M' | 'L' | 'XL' | '2XL' | '3XL';
   unitPrice: number;
