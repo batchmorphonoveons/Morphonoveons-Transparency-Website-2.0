@@ -1,295 +1,291 @@
-import React, { useState, useMemo } from 'react';
-import {
-  Plus,
-  Search,
-  Edit3,
-  Trash2,
-  Paperclip
-} from 'lucide-react';
-import {
-  JerseyRecord,
-  FinancialRecord,
-  DocumentAttachment
-} from '../types/transparency';
+import React, { useState, useEffect } from 'react';
+import { X, Shirt, Paperclip, Trash2 } from 'lucide-react';
+import { JerseyRecord, DocumentAttachment } from '../types/transparency';
 
+interface JerseyFormModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  recordToEdit: JerseyRecord | null;
+  defaultJerseyType?: 'batch_jersey' | 'mol_blue' | 'mmc_white';
+  onSave: (record: JerseyRecord, isNew: boolean, prevSnapshot?: JerseyRecord) => void;
+  onDelete?: (recordId: string, recordSnapshot: JerseyRecord) => void;
+}
+
+const DOC_TYPES = ['Proof of Payment', 'Receipt', 'Supplier Invoice', 'Collection Sheet', 'Other'];
+const MAX_TOTAL_CHARS = 700000; // keeps each order well under the 1 MB database limit
+const MAX_PDF_BYTES = 350000;
 const SECTION_GROUPS = [
   { label: 'MT1', sections: ['MT1-A', 'MT1-B', 'MT1-C', 'MT1-D'] },
   { label: 'MarE1', sections: ['MarE1-A', 'MarE1-B', 'MarE1-C', 'MarE1-D'] },
 ];
-const ALL_SECTIONS = SECTION_GROUPS.flatMap((g) => g.sections);
 
-const peso = (n: number) =>
-  `₱${n.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+const readAsDataUrl = (file: File): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(new Error('Could not read file'));
+    reader.readAsDataURL(file);
+  });
 
-interface JerseyRecordsViewProps {
-  jerseyType: 'batch_jersey' | 'mol_blue' | 'mmc_white';
-  title: string;
-  subtitle: string;
-  themeColor: string;
-  isAdmin: boolean;
-  jerseyRecords: JerseyRecord[];
-  financialRecords: FinancialRecord[];
-  onOpenAddOrder: () => void;
-  onOpenAddFinancial: (type: 'collection' | 'expense') => void;
-  onEditJersey: (record: JerseyRecord) => void;
-  onDeleteJersey: (id: string, record: JerseyRecord) => void;
-  onQuickUpdateStatus: (id: string, newStatus: 'Paid' | 'Partially Paid' | 'Unpaid') => void;
-  onQuickUpdateSupplier: (id: string, newStatus: 'Completed' | 'Pending') => void;
-  onEditFinancial: (record: FinancialRecord) => void;
-  onDeleteFinancial: (id: string, record: FinancialRecord) => void;
-  onViewDocument: (doc: DocumentAttachment, title: string, docs?: DocumentAttachment[]) => void;
-}
-
-export const JerseyRecordsView: React.FC<JerseyRecordsViewProps> = ({
-  jerseyType,
-  title,
-  subtitle,
-  themeColor,
-  isAdmin,
-  jerseyRecords,
-  financialRecords,
-  onOpenAddOrder,
-  onOpenAddFinancial,
-  onEditJersey,
-  onDeleteJersey,
-  onQuickUpdateStatus,
-  onQuickUpdateSupplier,
-  onEditFinancial,
-  onDeleteFinancial,
-  onViewDocument,
-}) => {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [sizeFilter, setSizeFilter] = useState<string>('all');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [supplierFilter, setSupplierFilter] = useState<string>('all');
-  const [sectionFilter, setSectionFilter] = useState<string>('all');
-
-  // Filter jersey records for this type
-  const currentJerseyOrders = useMemo(() => {
-    return jerseyRecords.filter((r) =>
-      jerseyType === 'mol_blue'
-        ? r.jerseyType === 'mol_blue' || r.jerseyType === 'mmc_white'
-        : r.jerseyType === jerseyType
-    );
-  }, [jerseyRecords, jerseyType]);
-
-  // Filter financial records for this jersey category
-  const currentFinRecords = useMemo(() => {
-    return financialRecords.filter((r) =>
-      jerseyType === 'mol_blue'
-        ? r.category === 'mol_blue' || r.category === 'mmc_white'
-        : r.category === jerseyType
-    );
-  }, [financialRecords, jerseyType]);
-
-  // Overall financial calculations
-  const totalCollections = useMemo(() => {
-    return currentFinRecords
-      .filter((r) => r.type === 'collection')
-      .reduce((sum, r) => sum + r.amount, 0);
-  }, [currentFinRecords]);
-
-  const totalSupplierDisbursed = useMemo(() => {
-    return currentFinRecords
-      .filter((r) => r.type === 'expense')
-      .reduce((sum, r) => sum + r.amount, 0);
-  }, [currentFinRecords]);
-
-  const availableFundBalance = totalCollections - totalSupplierDisbursed;
-
-  // Individual order metrics
-  const totalOrdersCount = currentJerseyOrders.length;
-  const totalOutstandingMemberBalances = useMemo(() => {
-    return currentJerseyOrders.reduce((sum, r) => sum + r.balance, 0);
-  }, [currentJerseyOrders]);
-
-  // Totals per section
-  const sectionSummary = useMemo(() => {
-    const rows = ALL_SECTIONS.map((sec) => {
-      const orders = currentJerseyOrders.filter((r) => r.section === sec);
-      return {
-        section: sec,
-        units: orders.length,
-        paid: orders.reduce((sum, r) => sum + r.amountPaid, 0),
-        balance: orders.reduce((sum, r) => sum + r.balance, 0),
+// Shrinks a photo so it stays small enough to save
+const compressImage = (file: File): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const attempt = (maxSide: number, quality: number) => {
+        const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return '';
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        return canvas.toDataURL('image/jpeg', quality);
       };
-    });
-    const unassigned = currentJerseyOrders.filter((r) => !r.section || !ALL_SECTIONS.includes(r.section));
-    return { rows, unassignedCount: unassigned.length };
-  }, [currentJerseyOrders]);
+      let out = attempt(1200, 0.7);
+      if (out.length > 250000) out = attempt(900, 0.55);
+      URL.revokeObjectURL(url);
+      out ? resolve(out) : reject(new Error('Could not process image'));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('Could not open image'));
+    };
+    img.src = url;
+  });
 
-  const filteredOrders = useMemo(() => {
-    return currentJerseyOrders.filter((r) => {
-      if (searchTerm) {
-        const q = searchTerm.toLowerCase();
-        const matchesRef = r.memberRef.toLowerCase().includes(q);
-        const matchesNum = r.jerseyNumber?.toLowerCase().includes(q);
-        const matchesSupp = r.supplierName?.toLowerCase().includes(q);
-        const matchesSection = r.section?.toLowerCase().includes(q);
-        if (!matchesRef && !matchesNum && !matchesSupp && !matchesSection) return false;
-      }
-      if (sectionFilter === 'none') {
-        if (r.section && ALL_SECTIONS.includes(r.section)) return false;
-      } else if (sectionFilter !== 'all' && r.section !== sectionFilter) {
-        return false;
-      }
-      if (sizeFilter !== 'all' && r.jerseySize !== sizeFilter) return false;
-      if (statusFilter !== 'all' && r.paymentStatus !== statusFilter) return false;
-      if (supplierFilter !== 'all' && r.supplierPaymentStatus !== supplierFilter) return false;
-      return true;
-    });
-  }, [currentJerseyOrders, searchTerm, sectionFilter, sizeFilter, statusFilter, supplierFilter]);
+export const JerseyFormModal: React.FC<JerseyFormModalProps> = ({
+  isOpen,
+  onClose,
+  recordToEdit,
+  defaultJerseyType = 'batch_jersey',
+  onSave,
+  onDelete,
+}) => {
+  const [jerseyType, setJerseyType] = useState<'batch_jersey' | 'mol_blue' | 'mmc_white'>(defaultJerseyType);
+  const [memberRef, setMemberRef] = useState('');
+  const [section, setSection] = useState('');
+  const [jerseyNumber, setJerseyNumber] = useState('');
+  const [jerseySize, setJerseySize] = useState<JerseyRecord['jerseySize']>('L');
+  const [unitPrice, setUnitPrice] = useState<string>('');
+  const [amountPaid, setAmountPaid] = useState<string>('');
+  const [paymentStatus, setPaymentStatus] = useState<JerseyRecord['paymentStatus']>('Unpaid');
+  const [supplierStatus, setSupplierStatus] = useState<JerseyRecord['supplierPaymentStatus']>('Pending');
+  const [supplierName, setSupplierName] = useState('');
+  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [documents, setDocuments] = useState<DocumentAttachment[]>([]);
+  const [docType, setDocType] = useState('Proof of Payment');
+  const [docError, setDocError] = useState('');
+  const [docBusy, setDocBusy] = useState(false);
 
-  const selectClass =
-    'px-2.5 py-1.5 text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-700 dark:text-slate-200';
+  useEffect(() => {
+    if (recordToEdit) {
+      setJerseyType(recordToEdit.jerseyType);
+      setMemberRef(recordToEdit.memberRef);
+      setSection((recordToEdit as any).section || '');
+      setJerseyNumber(recordToEdit.jerseyNumber || '');
+      setJerseySize(recordToEdit.jerseySize);
+      setUnitPrice(recordToEdit.unitPrice.toString());
+      setAmountPaid(recordToEdit.amountPaid.toString());
+      setPaymentStatus(recordToEdit.paymentStatus);
+      setSupplierStatus(recordToEdit.supplierPaymentStatus);
+      setSupplierName(recordToEdit.supplierName || '');
+      setDate(recordToEdit.date);
+      setDocuments(recordToEdit.documents || []);
+    } else {
+      setJerseyType(defaultJerseyType);
+      setMemberRef('');
+      setSection('');
+      setJerseyNumber('');
+      setJerseySize('L');
+      setUnitPrice('');
+      setAmountPaid('');
+      setPaymentStatus('Unpaid');
+      setSupplierStatus('Pending');
+      setSupplierName('');
+      setDate(new Date().toISOString().split('T')[0]);
+      setDocuments([]);
+    }
+    setDocType('Proof of Payment');
+    setDocError('');
+    setShowDeleteConfirm(false);
+  }, [recordToEdit, defaultJerseyType, isOpen]);
+
+  if (!isOpen) return null;
+
+  const parsedPrice = parseFloat(unitPrice) || 0;
+  const parsedPaid = parseFloat(amountPaid) || 0;
+  const calculatedBalance = Math.max(0, parsedPrice - parsedPaid);
+
+  const handlePaidChange = (val: string) => {
+    setAmountPaid(val);
+    const paid = parseFloat(val) || 0;
+    if (paid >= parsedPrice && parsedPrice > 0) {
+      setPaymentStatus('Paid');
+    } else if (paid > 0) {
+      setPaymentStatus('Partially Paid');
+    } else {
+      setPaymentStatus('Unpaid');
+    }
+  };
+
+  const handleFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (files.length === 0) return;
+    setDocError('');
+    setDocBusy(true);
+
+    let current = [...documents];
+    for (const file of files) {
+      try {
+        let dataUrl = '';
+        if (file.type.startsWith('image/')) {
+          dataUrl = await compressImage(file);
+        } else if (file.type === 'application/pdf') {
+          if (file.size > MAX_PDF_BYTES) {
+            setDocError(`"${file.name}" is too large. PDFs must be under 350 KB. Please attach a photo or screenshot instead.`);
+            continue;
+          }
+          dataUrl = await readAsDataUrl(file);
+        } else {
+          setDocError(`"${file.name}" is not supported. Attach a photo, screenshot, or small PDF.`);
+          continue;
+        }
+
+        const total = current.reduce((sum, d) => sum + (d.dataUrl?.length || 0), 0) + dataUrl.length;
+        if (total > MAX_TOTAL_CHARS) {
+          setDocError('Too many attachments for one order. Remove one before adding another.');
+          continue;
+        }
+
+        current = [
+          ...current,
+          {
+            id: `doc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+            name: file.name,
+            type: docType,
+            dataUrl,
+            uploadDate: new Date().toISOString().split('T')[0],
+            size: `${Math.max(1, Math.round((dataUrl.length * 0.75) / 1024))} KB`,
+          },
+        ];
+      } catch (err: any) {
+        setDocError(err?.message || 'Could not attach that file.');
+      }
+    }
+    setDocuments(current);
+    setDocBusy(false);
+  };
+
+  const removeDocument = (id: string) => {
+    setDocuments((prev) => prev.filter((d) => d.id !== id));
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!memberRef.trim() || docBusy) return;
+
+    const isNew = !recordToEdit;
+    const record: JerseyRecord = {
+      id: recordToEdit?.id || `jrs-${Date.now()}`,
+      jerseyType,
+      memberRef: memberRef.trim(),
+      section: section || undefined,
+      jerseyNumber: jerseyNumber.trim() || undefined,
+      jerseySize,
+      unitPrice: parsedPrice,
+      amountPaid: parsedPaid,
+      balance: calculatedBalance,
+      paymentStatus,
+      supplierPaymentStatus: supplierStatus,
+      supplierName: supplierName.trim() || undefined,
+      date,
+      documents,
+      createdAt: recordToEdit?.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    onSave(record, isNew, recordToEdit || undefined);
+    onClose();
+  };
+
+  const handleDelete = () => {
+    if (recordToEdit && onDelete) {
+      onDelete(recordToEdit.id, recordToEdit);
+      onClose();
+    }
+  };
+
+  const fieldClass =
+    'w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-800 dark:text-slate-200';
+  const labelClass =
+    'block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5';
 
   return (
-    <div className="space-y-6 animate-fadeIn">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300">
-              JERSEY FUND DASHBOARD
-            </span>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-sm animate-fadeIn">
+      <div
+        className="w-full max-w-lg bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col max-h-[92vh]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="bg-slate-900 text-white p-5 flex items-center justify-between border-b border-slate-800">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 flex items-center justify-center">
+              <Shirt className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-white">
+                {recordToEdit ? 'Edit Jersey Order Record' : 'Add Jersey Order Record'}
+              </h2>
+              <p className="text-xs text-slate-400">Track individual order payment and supplier status</p>
+            </div>
           </div>
-          <h2 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white mt-0.5">
-            {title}
-          </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            {subtitle}
-          </p>
+          <button onClick={onClose} className="p-1.5 rounded-lg text-slate-400 hover:text-white">
+            <X className="w-5 h-5" />
+          </button>
         </div>
 
-        {isAdmin && (
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => onOpenAddFinancial('collection')}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-sm transition-all"
+        <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelClass}>Jersey Division</label>
+              <select
+                value={jerseyType}
+                onChange={(e) => setJerseyType(e.target.value as any)}
+                className={fieldClass}
+              >
+                <option value="batch_jersey">Batch Official Jersey</option>
+                <option value="mol_blue">MOL Blue & MMC White Jersey</option>
+                {jerseyType === 'mmc_white' && <option value="mmc_white">MMC White Jersey</option>}
+              </select>
+            </div>
+
+            <div>
+              <label className={labelClass}>Member / Unit Reference Code</label>
+              <input
+                type="text"
+                required
+                value={memberRef}
+                onChange={(e) => setMemberRef(e.target.value)}
+                placeholder="Enter code or member reference"
+                className={`${fieldClass} font-mono`}
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className={labelClass}>Section</label>
+            <select
+              value={section}
+              onChange={(e) => setSection(e.target.value)}
+              required
+              className={`${fieldClass} font-bold`}
             >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Record Batch Payment</span>
-            </button>
-            <button
-              onClick={() => onOpenAddFinancial('expense')}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-sm transition-all"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Disburse to Supplier</span>
-            </button>
-            <button
-              onClick={onOpenAddOrder}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-sm transition-all"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Add Order Item</span>
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Metric Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-        <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
-          <div className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
-            Total Jersey Collections
-          </div>
-          <div className="text-2xl font-black text-slate-900 dark:text-white mt-1 font-mono">
-            {peso(totalCollections)}
-          </div>
-          <div className="text-[11px] text-slate-400 mt-1">Total payments received</div>
-        </div>
-
-        <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
-          <div className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
-            Supplier Disbursements
-          </div>
-          <div className="text-2xl font-black text-rose-600 dark:text-rose-400 mt-1 font-mono">
-            {peso(totalSupplierDisbursed)}
-          </div>
-          <div className="text-[11px] text-slate-400 mt-1">Paid to manufacturer</div>
-        </div>
-
-        <div className="p-5 bg-emerald-50/70 dark:bg-emerald-950/30 rounded-2xl border border-emerald-200 dark:border-emerald-800/60 shadow-sm">
-          <div className="text-xs font-semibold uppercase text-emerald-800 dark:text-emerald-300">
-            Available Fund Balance
-          </div>
-          <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-1 font-mono">
-            {peso(availableFundBalance)}
-          </div>
-          <div className="text-[11px] text-emerald-700/80 dark:text-emerald-400/80 mt-1">
-            Collections minus expenses
-          </div>
-        </div>
-
-        <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
-          <div className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
-            Orders / Pending Receivables
-          </div>
-          <div className="text-xl font-bold text-slate-900 dark:text-white mt-1">
-            {totalOrdersCount} Units
-          </div>
-          <div className="text-[11px] font-mono text-amber-600 dark:text-amber-400 mt-1">
-            Pending dues: {peso(totalOutstandingMemberBalances)}
-          </div>
-        </div>
-      </div>
-
-      {/* Orders per section */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 sm:p-5">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-bold text-slate-900 dark:text-white">Orders per Section</h3>
-          {sectionFilter !== 'all' && (
-            <button
-              onClick={() => setSectionFilter('all')}
-              className="text-xs text-indigo-600 dark:text-indigo-300 hover:underline"
-            >
-              Show all sections
-            </button>
-          )}
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {sectionSummary.rows.map((row) => (
-            <button
-              key={row.section}
-              onClick={() => setSectionFilter(sectionFilter === row.section ? 'all' : row.section)}
-              className={`text-left p-3 rounded-xl border transition-colors ${
-                sectionFilter === row.section
-                  ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950/40'
-                  : 'border-slate-200 dark:border-slate-700 hover:border-indigo-400'
-              }`}
-            >
-              <div className="text-xs font-bold font-mono text-slate-900 dark:text-white">{row.section}</div>
-              <div className="text-lg font-black text-slate-900 dark:text-white">{row.units} <span className="text-[11px] font-medium text-slate-400">units</span></div>
-              <div className="text-[11px] font-mono text-emerald-600 dark:text-emerald-400">Paid {peso(row.paid)}</div>
-              <div className="text-[11px] font-mono text-amber-600 dark:text-amber-400">Due {peso(row.balance)}</div>
-            </button>
-          ))}
-        </div>
-        {sectionSummary.unassignedCount > 0 && (
-          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-3">
-            {sectionSummary.unassignedCount} order(s) have no section yet.
-          </p>
-        )}
-      </div>
-
-      {/* Jersey Order Roster Table */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
-        <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 bg-slate-50/50 dark:bg-slate-800/20">
-          <div className="relative flex-1">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search member ref, section, jersey number, or supplier..."
-              className="w-full pl-9 pr-4 py-2 text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 dark:text-slate-200"
-            />
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <select value={sectionFilter} onChange={(e) => setSectionFilter(e.target.value)} className={selectClass}>
-              <option value="all">All Sections</option>
+              <option value="">Select section</option>
               {SECTION_GROUPS.map((g) => (
                 <optgroup key={g.label} label={g.label}>
                   {g.sections.map((s) => (
@@ -299,252 +295,213 @@ export const JerseyRecordsView: React.FC<JerseyRecordsViewProps> = ({
                   ))}
                 </optgroup>
               ))}
-              <option value="none">No section</option>
-            </select>
-
-            <select value={sizeFilter} onChange={(e) => setSizeFilter(e.target.value)} className={selectClass}>
-              <option value="all">All Sizes</option>
-              <option value="XS">XS</option>
-              <option value="S">S</option>
-              <option value="M">M</option>
-              <option value="L">L</option>
-              <option value="XL">XL</option>
-              <option value="2XL">2XL</option>
-              <option value="3XL">3XL</option>
-            </select>
-
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className={selectClass}>
-              <option value="all">All Payment Statuses</option>
-              <option value="Paid">Paid</option>
-              <option value="Partially Paid">Partially Paid</option>
-              <option value="Unpaid">Unpaid</option>
-            </select>
-
-            <select value={supplierFilter} onChange={(e) => setSupplierFilter(e.target.value)} className={selectClass}>
-              <option value="all">All Supplier Statuses</option>
-              <option value="Completed">Supplier: Completed</option>
-              <option value="Pending">Supplier: Pending</option>
             </select>
           </div>
-        </div>
 
-        {/* Table */}
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs text-left">
-            <thead className="bg-slate-100/75 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold border-b border-slate-200 dark:border-slate-700">
-              <tr>
-                <th className="py-3 px-4">Member / Unit Code</th>
-                <th className="py-3 px-4 text-center">Section</th>
-                <th className="py-3 px-4 text-center">Jersey #</th>
-                <th className="py-3 px-4 text-center">Size</th>
-                <th className="py-3 px-4 text-right">Price</th>
-                <th className="py-3 px-4 text-right">Paid</th>
-                <th className="py-3 px-4 text-right">Balance Due</th>
-                <th className="py-3 px-4 text-center">Payment Status</th>
-                <th className="py-3 px-4 text-center">Supplier Status</th>
-                <th className="py-3 px-4">Manufacturer</th>
-                <th className="py-3 px-4 text-center">Proof</th>
-                {isAdmin && <th className="py-3 px-4 text-right">Admin Actions</th>}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {filteredOrders.length > 0 ? (
-                filteredOrders.map((order) => (
-                  <tr key={order.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                    <td className="py-3 px-4 font-mono font-bold text-slate-900 dark:text-white whitespace-nowrap">
-                      {order.memberRef}
-                    </td>
-                    <td className="py-3 px-4 text-center whitespace-nowrap">
-                      {order.section ? (
-                        <span className="px-2 py-0.5 rounded font-mono font-semibold bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300">
-                          {order.section}
-                        </span>
-                      ) : (
-                        <span className="text-slate-400">—</span>
-                      )}
-                    </td>
-                    <td className="py-3 px-4 text-center font-mono font-bold text-indigo-600 dark:text-indigo-400">
-                      {order.jerseyNumber || '—'}
-                    </td>
-                    <td className="py-3 px-4 text-center">
-                      <span className="px-2 py-0.5 rounded font-mono font-semibold bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200">
-                        {order.jerseySize}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-right font-mono">₱{order.unitPrice.toFixed(2)}</td>
-                    <td className="py-3 px-4 text-right font-mono text-emerald-600 dark:text-emerald-400 font-semibold">
-                      ₱{order.amountPaid.toFixed(2)}
-                    </td>
-                    <td className="py-3 px-4 text-right font-mono font-bold">
-                      <span className={order.balance > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400'}>
-                        ₱{order.balance.toFixed(2)}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-center whitespace-nowrap">
-                      {isAdmin ? (
-                        <select
-                          value={order.paymentStatus}
-                          onChange={(e) => onQuickUpdateStatus(order.id, e.target.value as any)}
-                          className="px-2 py-0.5 text-[11px] font-semibold rounded-full border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 cursor-pointer"
-                        >
-                          <option value="Paid">Paid</option>
-                          <option value="Partially Paid">Partially Paid</option>
-                          <option value="Unpaid">Unpaid</option>
-                        </select>
-                      ) : (
-                        <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${
-                          order.paymentStatus === 'Paid'
-                            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                            : order.paymentStatus === 'Partially Paid'
-                            ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
-                            : 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
-                        }`}>
-                          {order.paymentStatus}
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-3 px-4 text-center whitespace-nowrap">
-                      {isAdmin ? (
-                        <select
-                          value={order.supplierPaymentStatus}
-                          onChange={(e) => onQuickUpdateSupplier(order.id, e.target.value as any)}
-                          className="px-2 py-0.5 text-[11px] font-semibold rounded-full border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 cursor-pointer"
-                        >
-                          <option value="Completed">Completed</option>
-                          <option value="Pending">Pending</option>
-                        </select>
-                      ) : (
-                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                          order.supplierPaymentStatus === 'Completed'
-                            ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300'
-                            : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
-                        }`}>
-                          {order.supplierPaymentStatus}
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-3 px-4 text-slate-600 dark:text-slate-400 whitespace-nowrap">
-                      {order.supplierName || '—'}
-                    </td>
-                    <td className="py-3 px-4 text-center whitespace-nowrap">
-                      {order.documents && order.documents.length > 0 ? (
-                        <button
-                          onClick={() =>
-                            onViewDocument(order.documents[0], `Order ${order.memberRef}`, order.documents)
-                          }
-                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100"
-                          title="View attached proof"
-                        >
-                          <Paperclip className="w-3 h-3" />
-                          {order.documents.length}
-                        </button>
-                      ) : (
-                        <span className="text-slate-400">—</span>
-                      )}
-                    </td>
-                    {isAdmin && (
-                      <td className="py-3 px-4 text-right whitespace-nowrap">
-                        <div className="flex items-center justify-end gap-1">
-                          <button
-                            onClick={() => onEditJersey(order)}
-                            className="p-1.5 text-slate-400 hover:text-indigo-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
-                            title="Edit"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => onDeleteJersey(order.id, order)}
-                            className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
-                            title="Delete"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
-                    )}
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={isAdmin ? 12 : 11} className="py-8 text-center text-slate-500 text-xs">
-                    No jersey records found for this filter.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelClass}>Jersey Size</label>
+              <select
+                value={jerseySize}
+                onChange={(e) => setJerseySize(e.target.value as any)}
+                className={`${fieldClass} font-bold`}
+              >
+                <option value="XS">XS (Extra Small)</option>
+                <option value="S">S (Small)</option>
+                <option value="M">M (Medium)</option>
+                <option value="L">L (Large)</option>
+                <option value="XL">XL (Extra Large)</option>
+                <option value="2XL">2XL (Double XL)</option>
+                <option value="3XL">3XL (Triple XL)</option>
+              </select>
+            </div>
 
-      {/* Payment & Disbursement Records */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
-        <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/20">
-          <h3 className="text-sm font-bold text-slate-900 dark:text-white">Batch Payments & Supplier Disbursements</h3>
-          <p className="text-xs text-slate-500 dark:text-slate-400">Records that feed the totals above</p>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs text-left">
-            <thead className="bg-slate-100/75 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold border-b border-slate-200 dark:border-slate-700">
-              <tr>
-                <th className="py-3 px-4">Date</th>
-                <th className="py-3 px-4">Type</th>
-                <th className="py-3 px-4">Description</th>
-                <th className="py-3 px-4">Source / Payee</th>
-                <th className="py-3 px-4 text-right">Amount</th>
-                {isAdmin && <th className="py-3 px-4 text-right">Admin Actions</th>}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {currentFinRecords.length > 0 ? (
-                currentFinRecords.map((rec) => (
-                  <tr key={rec.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                    <td className="py-3 px-4 whitespace-nowrap text-slate-600 dark:text-slate-400">{rec.date}</td>
-                    <td className="py-3 px-4 whitespace-nowrap">
-                      <span className={rec.type === 'collection' ? 'text-emerald-600 font-semibold' : 'text-rose-600 font-semibold'}>
-                        {rec.type === 'collection' ? 'Payment received' : 'Supplier disbursement'}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 font-semibold text-slate-900 dark:text-white">{rec.title}</td>
-                    <td className="py-3 px-4 text-slate-700 dark:text-slate-300">{rec.sourceOrPayee}</td>
-                    <td className="py-3 px-4 text-right font-mono font-bold">
-                      <span className={rec.type === 'collection' ? 'text-emerald-600' : 'text-rose-600'}>
-                        {rec.type === 'collection' ? '+' : '-'}{peso(rec.amount)}
-                      </span>
-                    </td>
-                    {isAdmin && (
-                      <td className="py-3 px-4 text-right whitespace-nowrap">
-                        <div className="flex items-center justify-end gap-1">
-                          <button
-                            onClick={() => onEditFinancial(rec)}
-                            className="p-1.5 text-slate-400 hover:text-indigo-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
-                            title="Edit"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => {
-                              if (window.confirm('Delete this record?')) onDeleteFinancial(rec.id, rec);
-                            }}
-                            className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
-                            title="Delete"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
-                    )}
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={isAdmin ? 6 : 5} className="py-8 text-center text-slate-500 text-xs">
-                    No payment or disbursement records yet.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+            <div>
+              <label className={labelClass}>Printed Number</label>
+              <input
+                type="text"
+                value={jerseyNumber}
+                onChange={(e) => setJerseyNumber(e.target.value)}
+                placeholder="Optional"
+                className={`${fieldClass} font-mono font-bold`}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className={labelClass}>Unit Price</label>
+              <input
+                type="number"
+                step="0.01"
+                required
+                value={unitPrice}
+                onChange={(e) => setUnitPrice(e.target.value)}
+                className={`${fieldClass} font-mono`}
+              />
+            </div>
+
+            <div>
+              <label className={labelClass}>Amount Paid</label>
+              <input
+                type="number"
+                step="0.01"
+                required
+                value={amountPaid}
+                onChange={(e) => handlePaidChange(e.target.value)}
+                className={`${fieldClass} font-mono`}
+              />
+            </div>
+
+            <div>
+              <label className={labelClass}>Balance Due</label>
+              <div className="w-full px-3 py-2 text-xs bg-slate-100 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white font-mono font-bold flex items-center">
+                ₱{calculatedBalance.toFixed(2)}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelClass}>Member Payment Status</label>
+              <select
+                value={paymentStatus}
+                onChange={(e) => setPaymentStatus(e.target.value as any)}
+                className={fieldClass}
+              >
+                <option value="Paid">Paid</option>
+                <option value="Partially Paid">Partially Paid</option>
+                <option value="Unpaid">Unpaid</option>
+              </select>
+            </div>
+
+            <div>
+              <label className={labelClass}>Supplier Payment Status</label>
+              <select
+                value={supplierStatus}
+                onChange={(e) => setSupplierStatus(e.target.value as any)}
+                className={fieldClass}
+              >
+                <option value="Completed">Completed (Disbursed)</option>
+                <option value="Pending">Pending (Unpaid)</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className={labelClass}>Apparel Manufacturer / Supplier</label>
+            <input
+              type="text"
+              value={supplierName}
+              onChange={(e) => setSupplierName(e.target.value)}
+              placeholder="Enter supplier name"
+              className={fieldClass}
+            />
+          </div>
+
+          {/* Supporting documents */}
+          <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 space-y-3">
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+              <Paperclip className="w-3.5 h-3.5" />
+              Supporting Documents
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <select value={docType} onChange={(e) => setDocType(e.target.value)} className={fieldClass}>
+                {DOC_TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+              <label className="px-3 py-2 text-xs text-center font-medium rounded-xl border border-dashed border-indigo-400 text-indigo-600 dark:text-indigo-300 cursor-pointer hover:bg-indigo-50 dark:hover:bg-indigo-950/30">
+                {docBusy ? 'Processing...' : 'Choose file'}
+                <input
+                  type="file"
+                  accept="image/*,application/pdf"
+                  multiple
+                  onChange={handleFiles}
+                  disabled={docBusy}
+                  className="hidden"
+                />
+              </label>
+            </div>
+
+            {docError && <p className="text-xs text-rose-500">{docError}</p>}
+
+            {documents.length > 0 ? (
+              <ul className="space-y-1.5">
+                {documents.map((d) => (
+                  <li
+                    key={d.id}
+                    className="flex items-center justify-between gap-2 px-2.5 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
+                  >
+                    <span className="truncate text-slate-700 dark:text-slate-200">
+                      {d.name} <span className="text-slate-400">· {d.type} · {d.size}</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => removeDocument(d.id)}
+                      className="text-rose-500 hover:text-rose-600 flex-shrink-0"
+                      title="Remove attachment"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-xs text-slate-400">No documents attached yet.</p>
+            )}
+            <p className="text-[11px] text-slate-400">
+              Photos are shrunk automatically. Attachments are saved when you click Save.
+            </p>
+          </div>
+
+          {/* Delete prompt */}
+          {showDeleteConfirm && (
+            <div className="p-3 bg-rose-50 dark:bg-rose-950/40 rounded-xl border border-rose-200 dark:border-rose-900 text-xs space-y-2">
+              <div className="text-rose-700 dark:text-rose-300 font-semibold">Confirm Deletion</div>
+              <p className="text-rose-600 dark:text-rose-400">Permanently delete jersey record {memberRef}?</p>
+              <div className="flex justify-end gap-2">
+                <button type="button" onClick={() => setShowDeleteConfirm(false)} className="px-2.5 py-1 bg-white dark:bg-slate-800 rounded border">
+                  Cancel
+                </button>
+                <button type="button" onClick={handleDelete} className="px-2.5 py-1 bg-rose-600 text-white rounded">
+                  Delete
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between">
+            {recordToEdit && onDelete && !showDeleteConfirm ? (
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirm(true)}
+                className="text-rose-600 hover:text-rose-700 text-xs font-medium"
+              >
+                Delete Order
+              </button>
+            ) : (
+              <div />
+            )}
+
+            <div className="flex gap-2">
+              <button type="button" onClick={onClose} className="px-4 py-2 text-xs text-slate-600">
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={docBusy}
+                className="px-5 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 rounded-xl"
+              >
+                {recordToEdit ? 'Save Changes' : 'Create Jersey Order'}
+              </button>
+            </div>
+          </div>
+        </form>
       </div>
     </div>
   );
+};
