@@ -1,24 +1,18 @@
 import React, { useState } from 'react';
-import { 
-  Shield, 
-  ShieldCheck, 
-  FileSpreadsheet, 
-  RefreshCw, 
-  Lock, 
-  LogOut, 
-  FileText, 
-  BarChart3, 
-  Coins, 
-  ShoppingBag, 
-  Shirt, 
-  Layers, 
+import {
+  Shield,
+  ShieldCheck,
+  Lock,
+  LogOut,
+  FileText,
+  BarChart3,
+  Coins,
+  ShoppingBag,
+  Shirt,
   History,
   Menu,
-  X,
-  ExternalLink
+  X
 } from 'lucide-react';
-import { CategoryKey } from '../types/transparency';
-import { GoogleSheetsConfig } from '../types/transparency';
 
 interface NavbarProps {
   isAdmin: boolean;
@@ -26,11 +20,7 @@ interface NavbarProps {
   onLogout: () => void;
   activeTab: string;
   setActiveTab: (tab: string) => void;
-  sheetsConfig: GoogleSheetsConfig;
-  onOpenSheetsModal: () => void;
   onOpenReportsModal: () => void;
-  onQuickSync: () => void;
-  isSyncing: boolean;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -39,11 +29,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onLogout,
   activeTab,
   setActiveTab,
-  sheetsConfig,
-  onOpenSheetsModal,
   onOpenReportsModal,
-  onQuickSync,
-  isSyncing,
 }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -76,22 +62,6 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Google Sheets Status Pill */}
-            <button
-              onClick={onOpenSheetsModal}
-              className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium transition-colors bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 hover:border-slate-600"
-              title="Google Sheets Auto-Sync Settings"
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
-              <span>
-                {sheetsConfig?.spreadsheetId  
-                 ? sheetsConfig?.lastSyncStatus === 'success'
-                    ? 'Sheets: Connected' 
-                    : 'Sheets: Attention'
-                  : 'Sheets: Setup Sync'}
-              </span>
-            </button>
-
             {/* Access Level Badge */}
             <div className="flex items-center gap-1.5">
               {isAdmin ? (
@@ -133,7 +103,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3.5">
         <div className="flex items-center justify-between">
           {/* Logo & Portal Title */}
-          <div 
+          <div
             onClick={() => setActiveTab('main')}
             className="cursor-pointer flex items-center gap-3 group"
           >
@@ -155,20 +125,6 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* Quick Actions */}
           <div className="hidden lg:flex items-center gap-2.5">
             <button
-              onClick={onQuickSync}
-              disabled={isSyncing}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-all ${
-                isSyncing 
-                  ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-300 dark:border-slate-700' 
-                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-700 hover:border-emerald-500 hover:text-emerald-600 dark:hover:text-emerald-400 shadow-sm'
-              }`}
-              title="Fetch latest data from Google Sheet"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 text-emerald-500 ${isSyncing ? 'animate-spin' : ''}`} />
-              <span>{isSyncing ? 'Syncing...' : 'Sync Sheet'}</span>
-            </button>
-
-            <button
               onClick={onOpenReportsModal}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 transition-colors shadow-sm"
             >
@@ -179,14 +135,6 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Mobile Menu Button */}
           <div className="flex lg:hidden items-center gap-2">
-            <button
-              onClick={onQuickSync}
-              disabled={isSyncing}
-              className="p-2 text-slate-600 dark:text-slate-300 hover:text-emerald-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
-              title="Sync with Google Sheet"
-            >
-              <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin text-emerald-500' : ''}`} />
-            </button>
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               className="p-2 text-slate-600 dark:text-slate-300 hover:text-slate-900 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
@@ -253,20 +201,10 @@ export const Navbar: React.FC<NavbarProps> = ({
               <FileText className="w-4 h-4" />
               Generate Financial Reports
             </button>
-
-            <button
-              onClick={() => {
-                onOpenSheetsModal();
-                setMobileMenuOpen(false);
-              }}
-              className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 rounded-lg"
-            >
-              <FileSpreadsheet className="w-4 h-4 text-emerald-500" />
-              Configure Google Sheets Sync
-            </button>
           </div>
         </div>
       )}
     </header>
   );
+  };
 };
