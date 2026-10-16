@@ -476,4 +476,3 @@ export const JerseyFormModal: React.FC<JerseyFormModalProps> = ({
     </div>
   );
 };
-};
