@@ -1,24 +1,25 @@
 import React, { useState, useMemo } from 'react';
-import { 
-  Shirt, 
-  Plus, 
-  Search, 
-  CheckCircle2, 
-  Clock, 
-  AlertCircle, 
-  Edit3, 
-  Trash2, 
-  Wallet, 
-  Building2, 
-  Users,
-  DollarSign
+import {
+  Plus,
+  Search,
+  Edit3,
+  Trash2,
+  Paperclip
 } from 'lucide-react';
-import { 
-  JerseyRecord, 
-  FinancialRecord, 
-  FinancialStatus, 
-  DocumentAttachment 
+import {
+  JerseyRecord,
+  FinancialRecord,
+  DocumentAttachment
 } from '../types/transparency';
+
+const SECTION_GROUPS = [
+  { label: 'MT1', sections: ['MT1-A', 'MT1-B', 'MT1-C', 'MT1-D'] },
+  { label: 'MarE1', sections: ['MarE1-A', 'MarE1-B', 'MarE1-C', 'MarE1-D'] },
+];
+const ALL_SECTIONS = SECTION_GROUPS.flatMap((g) => g.sections);
+
+const peso = (n: number) =>
+  `₱${n.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
 
 interface JerseyRecordsViewProps {
   jerseyType: 'batch_jersey' | 'mol_blue' | 'mmc_white';
@@ -36,7 +37,7 @@ interface JerseyRecordsViewProps {
   onQuickUpdateSupplier: (id: string, newStatus: 'Completed' | 'Pending') => void;
   onEditFinancial: (record: FinancialRecord) => void;
   onDeleteFinancial: (id: string, record: FinancialRecord) => void;
-  onViewDocument: (doc: DocumentAttachment, title: string) => void;
+  onViewDocument: (doc: DocumentAttachment, title: string, docs?: DocumentAttachment[]) => void;
 }
 
 export const JerseyRecordsView: React.FC<JerseyRecordsViewProps> = ({
@@ -61,8 +62,9 @@ export const JerseyRecordsView: React.FC<JerseyRecordsViewProps> = ({
   const [sizeFilter, setSizeFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [supplierFilter, setSupplierFilter] = useState<string>('all');
+  const [sectionFilter, setSectionFilter] = useState<string>('all');
 
-    // Filter jersey records for this type
+  // Filter jersey records for this type
   const currentJerseyOrders = useMemo(() => {
     return jerseyRecords.filter((r) =>
       jerseyType === 'mol_blue'
@@ -101,6 +103,21 @@ export const JerseyRecordsView: React.FC<JerseyRecordsViewProps> = ({
     return currentJerseyOrders.reduce((sum, r) => sum + r.balance, 0);
   }, [currentJerseyOrders]);
 
+  // Totals per section
+  const sectionSummary = useMemo(() => {
+    const rows = ALL_SECTIONS.map((sec) => {
+      const orders = currentJerseyOrders.filter((r) => r.section === sec);
+      return {
+        section: sec,
+        units: orders.length,
+        paid: orders.reduce((sum, r) => sum + r.amountPaid, 0),
+        balance: orders.reduce((sum, r) => sum + r.balance, 0),
+      };
+    });
+    const unassigned = currentJerseyOrders.filter((r) => !r.section || !ALL_SECTIONS.includes(r.section));
+    return { rows, unassignedCount: unassigned.length };
+  }, [currentJerseyOrders]);
+
   const filteredOrders = useMemo(() => {
     return currentJerseyOrders.filter((r) => {
       if (searchTerm) {
@@ -108,14 +125,23 @@ export const JerseyRecordsView: React.FC<JerseyRecordsViewProps> = ({
         const matchesRef = r.memberRef.toLowerCase().includes(q);
         const matchesNum = r.jerseyNumber?.toLowerCase().includes(q);
         const matchesSupp = r.supplierName?.toLowerCase().includes(q);
-        if (!matchesRef && !matchesNum && !matchesSupp) return false;
+        const matchesSection = r.section?.toLowerCase().includes(q);
+        if (!matchesRef && !matchesNum && !matchesSupp && !matchesSection) return false;
+      }
+      if (sectionFilter === 'none') {
+        if (r.section && ALL_SECTIONS.includes(r.section)) return false;
+      } else if (sectionFilter !== 'all' && r.section !== sectionFilter) {
+        return false;
       }
       if (sizeFilter !== 'all' && r.jerseySize !== sizeFilter) return false;
       if (statusFilter !== 'all' && r.paymentStatus !== statusFilter) return false;
       if (supplierFilter !== 'all' && r.supplierPaymentStatus !== supplierFilter) return false;
       return true;
     });
-  }, [currentJerseyOrders, searchTerm, sizeFilter, statusFilter, supplierFilter]);
+  }, [currentJerseyOrders, searchTerm, sectionFilter, sizeFilter, statusFilter, supplierFilter]);
+
+  const selectClass =
+    'px-2.5 py-1.5 text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-700 dark:text-slate-200';
 
   return (
     <div className="space-y-6 animate-fadeIn">
@@ -164,42 +190,38 @@ export const JerseyRecordsView: React.FC<JerseyRecordsViewProps> = ({
 
       {/* Metric Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-        {/* Total Collections */}
         <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
           <div className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
             Total Jersey Collections
           </div>
           <div className="text-2xl font-black text-slate-900 dark:text-white mt-1 font-mono">
-            ₱{totalCollections.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+            {peso(totalCollections)}
           </div>
           <div className="text-[11px] text-slate-400 mt-1">Total payments received</div>
         </div>
 
-        {/* Supplier Disbursements */}
         <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
           <div className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
             Supplier Disbursements
           </div>
           <div className="text-2xl font-black text-rose-600 dark:text-rose-400 mt-1 font-mono">
-            ₱{totalSupplierDisbursed.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+            {peso(totalSupplierDisbursed)}
           </div>
           <div className="text-[11px] text-slate-400 mt-1">Paid to manufacturer</div>
         </div>
 
-        {/* Available Fund Balance */}
         <div className="p-5 bg-emerald-50/70 dark:bg-emerald-950/30 rounded-2xl border border-emerald-200 dark:border-emerald-800/60 shadow-sm">
           <div className="text-xs font-semibold uppercase text-emerald-800 dark:text-emerald-300">
             Available Fund Balance
           </div>
           <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-1 font-mono">
-            ₱{availableFundBalance.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+            {peso(availableFundBalance)}
           </div>
           <div className="text-[11px] text-emerald-700/80 dark:text-emerald-400/80 mt-1">
             Collections minus expenses
           </div>
         </div>
 
-        {/* Orders & Receivables */}
         <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
           <div className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
             Orders / Pending Receivables
@@ -208,31 +230,79 @@ export const JerseyRecordsView: React.FC<JerseyRecordsViewProps> = ({
             {totalOrdersCount} Units
           </div>
           <div className="text-[11px] font-mono text-amber-600 dark:text-amber-400 mt-1">
-            Pending dues: ₱{totalOutstandingMemberBalances.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+            Pending dues: {peso(totalOutstandingMemberBalances)}
           </div>
         </div>
       </div>
 
+      {/* Orders per section */}
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 sm:p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-bold text-slate-900 dark:text-white">Orders per Section</h3>
+          {sectionFilter !== 'all' && (
+            <button
+              onClick={() => setSectionFilter('all')}
+              className="text-xs text-indigo-600 dark:text-indigo-300 hover:underline"
+            >
+              Show all sections
+            </button>
+          )}
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {sectionSummary.rows.map((row) => (
+            <button
+              key={row.section}
+              onClick={() => setSectionFilter(sectionFilter === row.section ? 'all' : row.section)}
+              className={`text-left p-3 rounded-xl border transition-colors ${
+                sectionFilter === row.section
+                  ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950/40'
+                  : 'border-slate-200 dark:border-slate-700 hover:border-indigo-400'
+              }`}
+            >
+              <div className="text-xs font-bold font-mono text-slate-900 dark:text-white">{row.section}</div>
+              <div className="text-lg font-black text-slate-900 dark:text-white">{row.units} <span className="text-[11px] font-medium text-slate-400">units</span></div>
+              <div className="text-[11px] font-mono text-emerald-600 dark:text-emerald-400">Paid {peso(row.paid)}</div>
+              <div className="text-[11px] font-mono text-amber-600 dark:text-amber-400">Due {peso(row.balance)}</div>
+            </button>
+          ))}
+        </div>
+        {sectionSummary.unassignedCount > 0 && (
+          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-3">
+            {sectionSummary.unassignedCount} order(s) have no section yet.
+          </p>
+        )}
+      </div>
+
       {/* Jersey Order Roster Table */}
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
-        <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-slate-50/50 dark:bg-slate-800/20">
+        <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 bg-slate-50/50 dark:bg-slate-800/20">
           <div className="relative flex-1">
             <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search member ref, jersey number, or supplier..."
+              placeholder="Search member ref, section, jersey number, or supplier..."
               className="w-full pl-9 pr-4 py-2 text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 dark:text-slate-200"
             />
           </div>
 
-          <div className="flex items-center gap-2">
-            <select
-              value={sizeFilter}
-              onChange={(e) => setSizeFilter(e.target.value)}
-              className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-700 dark:text-slate-200"
-            >
+          <div className="flex flex-wrap items-center gap-2">
+            <select value={sectionFilter} onChange={(e) => setSectionFilter(e.target.value)} className={selectClass}>
+              <option value="all">All Sections</option>
+              {SECTION_GROUPS.map((g) => (
+                <optgroup key={g.label} label={g.label}>
+                  {g.sections.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+              <option value="none">No section</option>
+            </select>
+
+            <select value={sizeFilter} onChange={(e) => setSizeFilter(e.target.value)} className={selectClass}>
               <option value="all">All Sizes</option>
               <option value="XS">XS</option>
               <option value="S">S</option>
@@ -243,22 +313,14 @@ export const JerseyRecordsView: React.FC<JerseyRecordsViewProps> = ({
               <option value="3XL">3XL</option>
             </select>
 
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-700 dark:text-slate-200"
-            >
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className={selectClass}>
               <option value="all">All Payment Statuses</option>
               <option value="Paid">Paid</option>
               <option value="Partially Paid">Partially Paid</option>
               <option value="Unpaid">Unpaid</option>
             </select>
 
-            <select
-              value={supplierFilter}
-              onChange={(e) => setSupplierFilter(e.target.value)}
-              className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-700 dark:text-slate-200"
-            >
+            <select value={supplierFilter} onChange={(e) => setSupplierFilter(e.target.value)} className={selectClass}>
               <option value="all">All Supplier Statuses</option>
               <option value="Completed">Supplier: Completed</option>
               <option value="Pending">Supplier: Pending</option>
@@ -272,6 +334,7 @@ export const JerseyRecordsView: React.FC<JerseyRecordsViewProps> = ({
             <thead className="bg-slate-100/75 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold border-b border-slate-200 dark:border-slate-700">
               <tr>
                 <th className="py-3 px-4">Member / Unit Code</th>
+                <th className="py-3 px-4 text-center">Section</th>
                 <th className="py-3 px-4 text-center">Jersey #</th>
                 <th className="py-3 px-4 text-center">Size</th>
                 <th className="py-3 px-4 text-right">Price</th>
@@ -280,6 +343,7 @@ export const JerseyRecordsView: React.FC<JerseyRecordsViewProps> = ({
                 <th className="py-3 px-4 text-center">Payment Status</th>
                 <th className="py-3 px-4 text-center">Supplier Status</th>
                 <th className="py-3 px-4">Manufacturer</th>
+                <th className="py-3 px-4 text-center">Proof</th>
                 {isAdmin && <th className="py-3 px-4 text-right">Admin Actions</th>}
               </tr>
             </thead>
@@ -289,6 +353,15 @@ export const JerseyRecordsView: React.FC<JerseyRecordsViewProps> = ({
                   <tr key={order.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
                     <td className="py-3 px-4 font-mono font-bold text-slate-900 dark:text-white whitespace-nowrap">
                       {order.memberRef}
+                    </td>
+                    <td className="py-3 px-4 text-center whitespace-nowrap">
+                      {order.section ? (
+                        <span className="px-2 py-0.5 rounded font-mono font-semibold bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300">
+                          {order.section}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
                     </td>
                     <td className="py-3 px-4 text-center font-mono font-bold text-indigo-600 dark:text-indigo-400">
                       {order.jerseyNumber || '—'}
@@ -351,7 +424,23 @@ export const JerseyRecordsView: React.FC<JerseyRecordsViewProps> = ({
                       )}
                     </td>
                     <td className="py-3 px-4 text-slate-600 dark:text-slate-400 whitespace-nowrap">
-                      {order.supplierName || 'Apex Sportswear'}
+                      {order.supplierName || '—'}
+                    </td>
+                    <td className="py-3 px-4 text-center whitespace-nowrap">
+                      {order.documents && order.documents.length > 0 ? (
+                        <button
+                          onClick={() =>
+                            onViewDocument(order.documents[0], `Order ${order.memberRef}`, order.documents)
+                          }
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100"
+                          title="View attached proof"
+                        >
+                          <Paperclip className="w-3 h-3" />
+                          {order.documents.length}
+                        </button>
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
                     </td>
                     {isAdmin && (
                       <td className="py-3 px-4 text-right whitespace-nowrap">
@@ -377,7 +466,7 @@ export const JerseyRecordsView: React.FC<JerseyRecordsViewProps> = ({
                 ))
               ) : (
                 <tr>
-                  <td colSpan={isAdmin ? 10 : 9} className="py-8 text-center text-slate-500 text-xs">
+                  <td colSpan={isAdmin ? 12 : 11} className="py-8 text-center text-slate-500 text-xs">
                     No jersey records found for this filter.
                   </td>
                 </tr>
@@ -386,7 +475,7 @@ export const JerseyRecordsView: React.FC<JerseyRecordsViewProps> = ({
           </table>
         </div>
       </div>
-   
+
       {/* Payment & Disbursement Records */}
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
         <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/20">
@@ -419,7 +508,7 @@ export const JerseyRecordsView: React.FC<JerseyRecordsViewProps> = ({
                     <td className="py-3 px-4 text-slate-700 dark:text-slate-300">{rec.sourceOrPayee}</td>
                     <td className="py-3 px-4 text-right font-mono font-bold">
                       <span className={rec.type === 'collection' ? 'text-emerald-600' : 'text-rose-600'}>
-                        {rec.type === 'collection' ? '+' : '-'}₱{rec.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                        {rec.type === 'collection' ? '+' : '-'}{peso(rec.amount)}
                       </span>
                     </td>
                     {isAdmin && (
@@ -459,4 +548,5 @@ export const JerseyRecordsView: React.FC<JerseyRecordsViewProps> = ({
       </div>
     </div>
   );
+  };
 };
