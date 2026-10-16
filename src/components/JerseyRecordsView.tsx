@@ -547,6 +547,5 @@ export const JerseyRecordsView: React.FC<JerseyRecordsViewProps> = ({
         </div>
       </div>
     </div>
-  );
-  };
+   );
 };
