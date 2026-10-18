@@ -1,6 +1,13 @@
 import { getApp } from 'firebase/app';
-import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
-import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import {
+  getFirestore,
+  doc,
+  collection,
+  setDoc,
+  deleteDoc,
+  onSnapshot
+} from 'firebase/firestore';
+import { signOut } from 'firebase/auth';
 import { auth } from '../firebase';
 import {
   FinancialRecord,
@@ -10,16 +17,18 @@ import {
   GoogleSheetsConfig
 } from '../types/transparency';
 
-// Records are stored in Firestore (shared by everyone) and cached in the browser.
+// Every record is saved as its own document in Firestore, so attachments
+// never hit the 1 MB document limit across all records together.
 const db = getFirestore(getApp());
 
-type SetName = 'financial' | 'selling' | 'jersey' | 'audit';
+type SetName = 'financial' | 'selling' | 'jersey' | 'audit' | 'progress';
 
-const CACHE_KEYS: Record<SetName, string> = {
-  financial: 'morphonoveons_financial_records_v2',
-  selling: 'morphonoveons_selling_records_v2',
-  jersey: 'morphonoveons_jersey_records_v2',
-  audit: 'morphonoveons_audit_logs_v2',
+const COLLECTIONS: Record<SetName, string> = {
+  financial: 'financial',
+  selling: 'selling',
+  jersey: 'jersey',
+  audit: 'audit',
+  progress: 'progress',
 };
 
 const STORAGE_KEYS = {
@@ -27,24 +36,19 @@ const STORAGE_KEYS = {
   ADMIN_SESSION: 'morphonoveons_admin_session_v1',
 };
 
-// Kept so the current login screen still works. Will be removed when login moves to Firebase.
-export const ADMIN_PASSWORD = 'Morbulutong2026';
-
-const readCache = (name: SetName): any[] => {
-  try {
-    const data = localStorage.getItem(CACHE_KEYS[name]);
-    return data ? JSON.parse(data) : [];
-  } catch {
-    return [];
-  }
-};
+// No longer used. Safe to delete once the old login screen is replaced.
+export const ADMIN_PASSWORD = '';
 
 const cache: Record<SetName, any[]> = {
-  financial: readCache('financial'),
-  selling: readCache('selling'),
-  jersey: readCache('jersey'),
-  audit: readCache('audit'),
+  financial: [],
+  selling: [],
+  jersey: [],
+  audit: [],
+  progress: [],
 };
+
+const sortKey = (name: SetName, r: any): string =>
+  String((name === 'audit' ? r.timestamp : r.createdAt) || '');
 
 // ---- Live updates ----
 const listeners = new Set<() => void>();
@@ -56,35 +60,22 @@ export const subscribeToData = (callback: () => void) => {
   };
 };
 
-const notify = () => {
-  if (listeners.size > 0) {
-    listeners.forEach((cb) => cb());
-    return;
-  }
-  // Nothing is listening yet: reload once so the page shows the latest data.
-  try {
-    const last = Number(sessionStorage.getItem('morph_last_reload') || 0);
-    if (Date.now() - last < 5000) return;
-    sessionStorage.setItem('morph_last_reload', String(Date.now()));
-  } catch {
-    return;
-  }
-  window.location.reload();
-};
+const notify = () => listeners.forEach((cb) => cb());
 
-(['financial', 'selling', 'jersey', 'audit'] as SetName[]).forEach((name) => {
+(Object.keys(COLLECTIONS) as SetName[]).forEach((name) => {
   onSnapshot(
-    doc(db, 'portal', name),
+    collection(db, COLLECTIONS[name]),
     (snap) => {
-      if (!snap.exists()) return;
-      const json = snap.data().json as string;
-      if (json === JSON.stringify(cache[name])) return;
-      try {
-        cache[name] = JSON.parse(json);
-      } catch {
-        return;
-      }
-      localStorage.setItem(CACHE_KEYS[name], json);
+      const items: any[] = [];
+      snap.docs.forEach((d) => {
+        try {
+          items.push(JSON.parse(d.data().json));
+        } catch {
+          /* skip unreadable record */
+        }
+      });
+      items.sort((a, b) => sortKey(name, b).localeCompare(sortKey(name, a)));
+      cache[name] = items;
       notify();
     },
     (err) => console.error(`Could not load ${name} records:`, err)
@@ -92,15 +83,29 @@ const notify = () => {
 });
 
 let warned = false;
+const onWriteError = (err: unknown) => {
+  console.error('Could not save to the shared database:', err);
+  if (!warned) {
+    warned = true;
+    alert('Could not save to the shared database. Please log in as an administrator, or the record may be too large (try a smaller attachment).');
+    setTimeout(() => { warned = false; }, 10000);
+  }
+};
+
 const persist = (name: SetName, records: any[]) => {
+  const prev = new Map<string, string>(cache[name].map((r) => [r.id, JSON.stringify(r)]));
+  const nextIds = new Set<string>(records.map((r) => r.id));
   cache[name] = records;
-  const json = JSON.stringify(records);
-  localStorage.setItem(CACHE_KEYS[name], json);
-  setDoc(doc(db, 'portal', name), { json, updatedAt: Date.now() }).catch((err) => {
-    console.error(`Could not save ${name} records:`, err);
-    if (!warned) {
-      warned = true;
-      alert('Could not save to the shared database. Please sign in as an administrator.');
+
+  records.forEach((r) => {
+    const json = JSON.stringify(r);
+    if (prev.get(r.id) !== json) {
+      setDoc(doc(db, COLLECTIONS[name], r.id), { json, updatedAt: Date.now() }).catch(onWriteError);
+    }
+  });
+  prev.forEach((_, id) => {
+    if (!nextIds.has(id)) {
+      deleteDoc(doc(db, COLLECTIONS[name], id)).catch(onWriteError);
     }
   });
 };
@@ -116,6 +121,10 @@ export const saveSellingRecords = (records: SellingActivityRecord[]) => persist(
 // ---- Jersey records ----
 export const getJerseyRecords = (): JerseyRecord[] => cache.jersey;
 export const saveJerseyRecords = (records: JerseyRecord[]) => persist('jersey', records);
+
+// ---- Jersey order progress (one record per step) ----
+export const getProgressRecords = (): any[] => cache.progress;
+export const saveProgressRecords = (records: any[]) => persist('progress', records);
 
 // ---- Audit log ----
 export const getAuditLogs = (): AuditLog[] => cache.audit;
@@ -142,47 +151,37 @@ export const addAuditLog = (
   return newLog;
 };
 
-// ---- Google Sheets settings (per browser) ----
+// ---- Google Sheets settings (no longer used by the app) ----
 const defaultSheetsConfig = (): GoogleSheetsConfig => ({
   spreadsheetId: '',
   sheetUrl: '',
-  autoSyncEnabled: true,
+  autoSyncEnabled: false,
   syncIntervalMinutes: 2,
   lastSyncStatus: 'idle',
 });
 
 export const getSheetsConfig = (): GoogleSheetsConfig => {
-  const data = localStorage.getItem(STORAGE_KEYS.SHEETS_CONFIG);
-  if (!data) return defaultSheetsConfig();
   try {
-    return JSON.parse(data);
+    const data = localStorage.getItem(STORAGE_KEYS.SHEETS_CONFIG);
+    return data ? JSON.parse(data) : defaultSheetsConfig();
   } catch {
     return defaultSheetsConfig();
   }
 };
 
 export const saveSheetsConfig = (config: GoogleSheetsConfig) => {
-  localStorage.setItem(STORAGE_KEYS.SHEETS_CONFIG, JSON.stringify(config));
-};
-
-// ---- Admin session ----
-export const getAdminAuth = (): boolean => {
-  return sessionStorage.getItem(STORAGE_KEYS.ADMIN_SESSION) === 'true';
-};
-
-export const setAdminAuth = (isAuthenticated: boolean) => {
-  if (isAuthenticated) {
-    sessionStorage.setItem(STORAGE_KEYS.ADMIN_SESSION, 'true');
-  } else {
-    sessionStorage.removeItem(STORAGE_KEYS.ADMIN_SESSION);
-    signOut(auth).catch(() => {});
+  try {
+    localStorage.setItem(STORAGE_KEYS.SHEETS_CONFIG, JSON.stringify(config));
+  } catch {
+    /* ignore */
   }
 };
 
-// Firebase admin login (used once the login screen is switched over).
-export const adminSignIn = async (email: string, password: string) => {
-  await signInWithEmailAndPassword(auth, email, password);
-  setAdminAuth(true);
+// ---- Admin session ----
+export const getAdminAuth = (): boolean => !!auth.currentUser;
+
+export const setAdminAuth = (isAuthenticated: boolean) => {
+  if (!isAuthenticated) signOut(auth).catch(() => {});
 };
 
 // ---- Reset ----
