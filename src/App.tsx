@@ -16,24 +16,25 @@ import { RecordFormModal } from './components/RecordFormModal';
 import { SellingFormModal } from './components/SellingFormModal';
 import { JerseyFormModal } from './components/JerseyFormModal';
 import { DocumentViewerModal } from './components/DocumentViewerModal';
+import { JerseyProgressTracker } from './components/JerseyProgressTracker';
 
-import { 
-  FinancialRecord, 
-  SellingActivityRecord, 
-  JerseyRecord, 
-  AuditLog, 
-  CategoryKey, 
-  DocumentAttachment 
+import {
+  FinancialRecord,
+  SellingActivityRecord,
+  JerseyRecord,
+  AuditLog,
+  CategoryKey,
+  DocumentAttachment
 } from './types/transparency';
-import { 
-  getFinancialRecords, 
-  saveFinancialRecords, 
-  getSellingRecords, 
-  saveSellingRecords, 
-  getJerseyRecords, 
-  saveJerseyRecords, 
-  getAuditLogs, 
-  addAuditLog, 
+import {
+  getFinancialRecords,
+  saveFinancialRecords,
+  getSellingRecords,
+  saveSellingRecords,
+  getJerseyRecords,
+  saveJerseyRecords,
+  getAuditLogs,
+  addAuditLog,
   subscribeToData
 } from './services/storage';
 import { auth } from './firebase';
@@ -121,8 +122,8 @@ export default function App() {
 
   // Financial Record handlers
   const handleSaveFinancialRecord = (
-    record: FinancialRecord, 
-    isNew: boolean, 
+    record: FinancialRecord,
+    isNew: boolean,
     previousSnapshot?: FinancialRecord
   ) => {
     const existing = getFinancialRecords();
@@ -138,8 +139,8 @@ export default function App() {
       );
     } else {
       updated = existing.map((r) => (r.id === record.id ? record : r));
-      const prevInfo = previousSnapshot 
-        ? `Prev: ₱${previousSnapshot.amount.toFixed(2)} (${previousSnapshot.status})` 
+      const prevInfo = previousSnapshot
+        ? `Prev: ₱${previousSnapshot.amount.toFixed(2)} (${previousSnapshot.status})`
         : 'Existing record';
       addAuditLog(
         'Updated',
@@ -175,8 +176,8 @@ export default function App() {
 
   // Selling Activity Record handlers
   const handleSaveSelling = (
-    record: SellingActivityRecord, 
-    isNew: boolean, 
+    record: SellingActivityRecord,
+    isNew: boolean,
     prevSnapshot?: SellingActivityRecord
   ) => {
     const existing = getSellingRecords();
@@ -226,8 +227,8 @@ export default function App() {
 
   // Jersey Record handlers
   const handleSaveJersey = (
-    record: JerseyRecord, 
-    isNew: boolean, 
+    record: JerseyRecord,
+    isNew: boolean,
     prevSnapshot?: JerseyRecord
   ) => {
     const existing = getJerseyRecords();
@@ -341,32 +342,32 @@ export default function App() {
   };
 
   // Open Document Viewer
-     const handleViewDocument = (
-     doc: DocumentAttachment,
-     title: string,
-     docs?: DocumentAttachment[]
-   ) => {
-     let siblings: DocumentAttachment[] = docs && docs.length > 0 ? docs : [doc];
+  const handleViewDocument = (
+    doc: DocumentAttachment,
+    title: string,
+    docs?: DocumentAttachment[]
+  ) => {
+    let siblings: DocumentAttachment[] = docs && docs.length > 0 ? docs : [doc];
 
-     if (!docs || docs.length === 0) {
-       const allRecords: any[] = [...financialRecords, ...sellingRecords, ...jerseyRecords];
-       outer: for (const rec of allRecords) {
-         for (const value of Object.values(rec)) {
-           if (
-             Array.isArray(value) &&
-             value.some((d: any) => d && typeof d === 'object' && d.name === doc.name && d.dataUrl === doc.dataUrl)
-           ) {
-             siblings = value as DocumentAttachment[];
-             break outer;
-           }
-         }
-       }
-     }
+    if (!docs || docs.length === 0) {
+      const allRecords: any[] = [...financialRecords, ...sellingRecords, ...jerseyRecords];
+      outer: for (const rec of allRecords) {
+        for (const value of Object.values(rec)) {
+          if (
+            Array.isArray(value) &&
+            value.some((d: any) => d && typeof d === 'object' && d.name === doc.name && d.dataUrl === doc.dataUrl)
+          ) {
+            siblings = value as DocumentAttachment[];
+            break outer;
+          }
+        }
+      }
+    }
 
-     setViewingDocs(siblings);
-     setViewingDoc(doc);
-     setViewingDocTitle(title);
-   };
+    setViewingDocs(siblings);
+    setViewingDoc(doc);
+    setViewingDocTitle(title);
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col antialiased selection:bg-emerald-500 selection:text-white">
@@ -451,77 +452,91 @@ export default function App() {
         )}
 
         {activeTab === 'batch_jersey' && (
-          <JerseyRecordsView
-            jerseyType="batch_jersey"
-            title="Batch Official Jersey Fund"
-            subtitle="Official batch jersey collections, sizing roster, and production disbursements to manufacturer"
-            themeColor="indigo"
-            isAdmin={isAdmin}
-            jerseyRecords={jerseyRecords}
-            financialRecords={financialRecords}
-            onOpenAddOrder={() => {
-              setJerseyToEdit(null);
-              setDefaultJerseyType('batch_jersey');
-              setIsJerseyModalOpen(true);
-            }}
-            onOpenAddFinancial={(type) => {
-              setDefaultCategory('batch_jersey');
-              setDefaultType(type);
-              setRecordToEdit(null);
-              setIsRecordModalOpen(true);
-            }}
-            onEditJersey={(rec) => {
-              setJerseyToEdit(rec);
-              setDefaultJerseyType('batch_jersey');
-              setIsJerseyModalOpen(true);
-            }}
-            onDeleteJersey={handleDeleteJersey}
-            onQuickUpdateStatus={handleQuickUpdateJerseyStatus}
-            onQuickUpdateSupplier={handleQuickUpdateJerseySupplier}
-                        onEditFinancial={(rec) => {
-              setRecordToEdit(rec);
-              setIsRecordModalOpen(true);
-            }}
-            onDeleteFinancial={handleDeleteFinancialRecord}
-            onViewDocument={handleViewDocument}
-          />
+          <div className="space-y-6">
+            <JerseyProgressTracker
+              fund="batch_jersey"
+              isAdmin={isAdmin}
+              onViewDocument={handleViewDocument}
+            />
+            <JerseyRecordsView
+              jerseyType="batch_jersey"
+              title="Batch Official Jersey Fund"
+              subtitle="Official batch jersey collections, sizing roster, and production disbursements to manufacturer"
+              themeColor="indigo"
+              isAdmin={isAdmin}
+              jerseyRecords={jerseyRecords}
+              financialRecords={financialRecords}
+              onOpenAddOrder={() => {
+                setJerseyToEdit(null);
+                setDefaultJerseyType('batch_jersey');
+                setIsJerseyModalOpen(true);
+              }}
+              onOpenAddFinancial={(type) => {
+                setDefaultCategory('batch_jersey');
+                setDefaultType(type);
+                setRecordToEdit(null);
+                setIsRecordModalOpen(true);
+              }}
+              onEditJersey={(rec) => {
+                setJerseyToEdit(rec);
+                setDefaultJerseyType('batch_jersey');
+                setIsJerseyModalOpen(true);
+              }}
+              onDeleteJersey={handleDeleteJersey}
+              onQuickUpdateStatus={handleQuickUpdateJerseyStatus}
+              onQuickUpdateSupplier={handleQuickUpdateJerseySupplier}
+              onEditFinancial={(rec) => {
+                setRecordToEdit(rec);
+                setIsRecordModalOpen(true);
+              }}
+              onDeleteFinancial={handleDeleteFinancialRecord}
+              onViewDocument={handleViewDocument}
+            />
+          </div>
         )}
 
         {activeTab === 'mol_blue' && (
-          <JerseyRecordsView
-            jerseyType="mol_blue"
-            title="MOL Blue & MMC White Jersey Fund"
-            subtitle="Combined MOL Blue and MMC White sports jersey fees, orders, and apparel manufacturer payments"
-            themeColor="blue"
-            isAdmin={isAdmin}
-            jerseyRecords={jerseyRecords}
-            financialRecords={financialRecords}
-            onOpenAddOrder={() => {
-              setJerseyToEdit(null);
-              setDefaultJerseyType('mol_blue');
-              setIsJerseyModalOpen(true);
-            }}
-            onOpenAddFinancial={(type) => {
-              setDefaultCategory('mol_blue');
-              setDefaultType(type);
-              setRecordToEdit(null);
-              setIsRecordModalOpen(true);
-            }}
-            onEditJersey={(rec) => {
-              setJerseyToEdit(rec);
-              setDefaultJerseyType('mol_blue');
-              setIsJerseyModalOpen(true);
-            }}
-            onDeleteJersey={handleDeleteJersey}
-            onQuickUpdateStatus={handleQuickUpdateJerseyStatus}
-            onQuickUpdateSupplier={handleQuickUpdateJerseySupplier}
-                        onEditFinancial={(rec) => {
-              setRecordToEdit(rec);
-              setIsRecordModalOpen(true);
-            }}
-            onDeleteFinancial={handleDeleteFinancialRecord}
-            onViewDocument={handleViewDocument}
-          />
+          <div className="space-y-6">
+            <JerseyProgressTracker
+              fund="mol_blue"
+              isAdmin={isAdmin}
+              onViewDocument={handleViewDocument}
+            />
+            <JerseyRecordsView
+              jerseyType="mol_blue"
+              title="MOL Blue & MMC White Jersey Fund"
+              subtitle="Combined MOL Blue and MMC White sports jersey fees, orders, and apparel manufacturer payments"
+              themeColor="blue"
+              isAdmin={isAdmin}
+              jerseyRecords={jerseyRecords}
+              financialRecords={financialRecords}
+              onOpenAddOrder={() => {
+                setJerseyToEdit(null);
+                setDefaultJerseyType('mol_blue');
+                setIsJerseyModalOpen(true);
+              }}
+              onOpenAddFinancial={(type) => {
+                setDefaultCategory('mol_blue');
+                setDefaultType(type);
+                setRecordToEdit(null);
+                setIsRecordModalOpen(true);
+              }}
+              onEditJersey={(rec) => {
+                setJerseyToEdit(rec);
+                setDefaultJerseyType('mol_blue');
+                setIsJerseyModalOpen(true);
+              }}
+              onDeleteJersey={handleDeleteJersey}
+              onQuickUpdateStatus={handleQuickUpdateJerseyStatus}
+              onQuickUpdateSupplier={handleQuickUpdateJerseySupplier}
+              onEditFinancial={(rec) => {
+                setRecordToEdit(rec);
+                setIsRecordModalOpen(true);
+              }}
+              onDeleteFinancial={handleDeleteFinancialRecord}
+              onViewDocument={handleViewDocument}
+            />
+          </div>
         )}
 
         {activeTab === 'audit_log' && (
@@ -602,16 +617,16 @@ export default function App() {
         onDelete={handleDeleteJersey}
       />
 
-         <DocumentViewerModal
-     document={viewingDoc}
-     documents={viewingDocs}
-     recordTitle={viewingDocTitle}
-     onClose={() => {
-       setViewingDoc(null);
-       setViewingDocs([]);
-       setViewingDocTitle('');
-     }}
-   />
+      <DocumentViewerModal
+        document={viewingDoc}
+        documents={viewingDocs}
+        recordTitle={viewingDocTitle}
+        onClose={() => {
+          setViewingDoc(null);
+          setViewingDocs([]);
+          setViewingDocTitle('');
+        }}
+      />
     </div>
   );
 }
