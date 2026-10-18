@@ -7,7 +7,7 @@ import {
   deleteDoc,
   onSnapshot
 } from 'firebase/firestore';
-import { signOut } from 'firebase/auth';
+import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { auth } from '../firebase';
 import {
   FinancialRecord,
@@ -182,6 +182,11 @@ export const getAdminAuth = (): boolean => !!auth.currentUser;
 
 export const setAdminAuth = (isAuthenticated: boolean) => {
   if (!isAuthenticated) signOut(auth).catch(() => {});
+};
+
+// Firebase admin login (email + password), used by the login screen.
+export const adminSignIn = async (email: string, password: string) => {
+  await signInWithEmailAndPassword(auth, email, password);
 };
 
 // ---- Reset ----
