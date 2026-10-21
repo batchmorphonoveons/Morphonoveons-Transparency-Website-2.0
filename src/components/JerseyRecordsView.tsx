@@ -103,6 +103,22 @@ export const JerseyRecordsView: React.FC<JerseyRecordsViewProps> = ({
     return currentJerseyOrders.reduce((sum, r) => sum + r.balance, 0);
   }, [currentJerseyOrders]);
 
+  // Total paid by members across all orders (counts partial payments too)
+  const paymentSummary = useMemo(() => {
+    const expected = currentJerseyOrders.reduce((sum, r) => sum + r.unitPrice, 0);
+    const paid = currentJerseyOrders.reduce((sum, r) => sum + r.amountPaid, 0);
+    const count = (status: string) => currentJerseyOrders.filter((r) => r.paymentStatus === status).length;
+    return {
+      expected,
+      paid,
+      balance: Math.max(0, expected - paid),
+      paidCount: count('Paid'),
+      partialCount: count('Partially Paid'),
+      unpaidCount: count('Unpaid'),
+      pct: expected > 0 ? Math.min(100, Math.round((paid / expected) * 100)) : 0,
+    };
+  }, [currentJerseyOrders]);
+
   // Totals per section
   const sectionSummary = useMemo(() => {
     const rows = ALL_SECTIONS.map((sec) => {
@@ -232,6 +248,50 @@ export const JerseyRecordsView: React.FC<JerseyRecordsViewProps> = ({
           <div className="text-[11px] font-mono text-amber-600 dark:text-amber-400 mt-1">
             Pending dues: {peso(totalOutstandingMemberBalances)}
           </div>
+        </div>
+      </div>
+
+      {/* Member payments summary (all orders, including unfinished payments) */}
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 sm:p-5">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <div>
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white">Member Payments Summary</h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Total paid across all orders, including orders that are not fully paid yet
+            </p>
+          </div>
+          <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+            {paymentSummary.pct}% collected
+          </span>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="p-3 rounded-xl border border-emerald-200 dark:border-emerald-800/60 bg-emerald-50/70 dark:bg-emerald-950/30">
+            <div className="text-[11px] font-semibold uppercase text-emerald-800 dark:text-emerald-300">Total Paid So Far</div>
+            <div className="text-lg font-black font-mono text-emerald-600 dark:text-emerald-400">{peso(paymentSummary.paid)}</div>
+          </div>
+          <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-700">
+            <div className="text-[11px] font-semibold uppercase text-slate-500 dark:text-slate-400">Total Expected</div>
+            <div className="text-lg font-black font-mono text-slate-900 dark:text-white">{peso(paymentSummary.expected)}</div>
+          </div>
+          <div className="p-3 rounded-xl border border-amber-200 dark:border-amber-800/60 bg-amber-50/60 dark:bg-amber-950/20">
+            <div className="text-[11px] font-semibold uppercase text-amber-800 dark:text-amber-300">Still To Collect</div>
+            <div className="text-lg font-black font-mono text-amber-600 dark:text-amber-400">{peso(paymentSummary.balance)}</div>
+          </div>
+          <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-700">
+            <div className="text-[11px] font-semibold uppercase text-slate-500 dark:text-slate-400">Orders</div>
+            <div className="text-xs font-semibold text-slate-900 dark:text-white mt-1">
+              <span className="text-emerald-600 dark:text-emerald-400">{paymentSummary.paidCount} paid</span>
+              {' · '}
+              <span className="text-amber-600 dark:text-amber-400">{paymentSummary.partialCount} partial</span>
+              {' · '}
+              <span className="text-rose-600 dark:text-rose-400">{paymentSummary.unpaidCount} unpaid</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-3 h-2 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
+          <div className="h-full bg-emerald-500" style={{ width: `${paymentSummary.pct}%` }} />
         </div>
       </div>
 
@@ -547,5 +607,5 @@ export const JerseyRecordsView: React.FC<JerseyRecordsViewProps> = ({
         </div>
       </div>
     </div>
-   );
+  );
 };
