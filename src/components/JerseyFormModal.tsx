@@ -1,7 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { X, Shirt, Paperclip, Trash2 } from 'lucide-react';
 import { JerseyRecord, DocumentAttachment } from '../types/transparency';
-import { SIZES, SOLO_PRICE, PAIR_PRICE, JerseyItem, kindsForType, priceFor, describePieces, getOrderItems } from '../jerseyPricing';
+import {
+  SIZES,
+  SOLO_PRICE,
+  PAIR_PRICE,
+  JerseyItem,
+  kindsForType,
+  isPairedType,
+  solveOrder,
+  buildSlots,
+  describeCounts,
+  piecesFor,
+  getOrderItems,
+} from '../jerseyPricing';
 
 interface JerseyFormModalProps {
   isOpen: boolean;
@@ -70,7 +82,6 @@ export const JerseyFormModal: React.FC<JerseyFormModalProps> = ({
   const [memberRef, setMemberRef] = useState('');
   const [section, setSection] = useState('');
   const [items, setItems] = useState<JerseyItem[]>([]);
-  const [priceManual, setPriceManual] = useState(false);
   const [unitPrice, setUnitPrice] = useState<string>('');
   const [amountPaid, setAmountPaid] = useState<string>('');
   const [paymentStatus, setPaymentStatus] = useState<JerseyRecord['paymentStatus']>('Unpaid');
@@ -83,13 +94,22 @@ export const JerseyFormModal: React.FC<JerseyFormModalProps> = ({
   const [docError, setDocError] = useState('');
   const [docBusy, setDocBusy] = useState(false);
 
+  const parsedPrice = parseFloat(unitPrice) || 0;
+  const parsedPaid = parseFloat(amountPaid) || 0;
+  const calculatedBalance = Math.max(0, parsedPrice - parsedPaid);
+
+  // The order total decides how many pairs and solos the order has
+  const counts = useMemo(() => solveOrder(parsedPrice), [parsedPrice]);
+  const slots = useMemo(() => (counts ? buildSlots(counts, jerseyType) : []), [counts, jerseyType]);
+  const slotKey = slots.map((s) => `${s.group}:${s.fixedKind || ''}`).join('|');
+  const priceInvalid = unitPrice.trim() !== '' && !counts;
+
   useEffect(() => {
     if (recordToEdit) {
       setJerseyType(recordToEdit.jerseyType);
       setMemberRef(recordToEdit.memberRef);
       setSection((recordToEdit as any).section || '');
       setItems(getOrderItems(recordToEdit));
-      setPriceManual(true);
       setUnitPrice(recordToEdit.unitPrice.toString());
       setAmountPaid(recordToEdit.amountPaid.toString());
       setPaymentStatus(recordToEdit.paymentStatus);
@@ -101,9 +121,8 @@ export const JerseyFormModal: React.FC<JerseyFormModalProps> = ({
       setJerseyType(defaultJerseyType);
       setMemberRef('');
       setSection('');
-      setItems([{ id: `item-${Date.now()}`, kind: kindsForType(defaultJerseyType)[0], size: 'L' }]);
-      setPriceManual(false);
-      setUnitPrice(String(priceFor(1)));
+      setItems([]);
+      setUnitPrice('');
       setAmountPaid('');
       setPaymentStatus('Unpaid');
       setSupplierStatus('Pending');
@@ -116,24 +135,30 @@ export const JerseyFormModal: React.FC<JerseyFormModalProps> = ({
     setShowDeleteConfirm(false);
   }, [recordToEdit, defaultJerseyType, isOpen]);
 
-  // Price follows the number of pieces (pairs and solos) until the price is typed in by hand
+  // Keep the piece rows matched to the order total (2 per pair, 1 per solo).
+  // Rows keep their size and number by position. While the total is not valid, nothing changes.
   useEffect(() => {
-    if (!priceManual && items.length > 0) setUnitPrice(String(priceFor(items.length)));
-  }, [items.length, priceManual]);
-
-  // When the division changes, move any piece whose item type no longer fits
-  useEffect(() => {
+    if (!counts) return;
     const kinds = kindsForType(jerseyType);
     setItems((prev) =>
-      prev.map((it) => (kinds.includes(it.kind) || it.kind === 'Not specified' ? it : { ...it, kind: kinds[0] }))
+      slots.map((slot, i) => {
+        const old = prev[i];
+        let kind = slot.fixedKind;
+        if (!kind) {
+          kind = old && (kinds.includes(old.kind) || old.kind === 'Not specified') ? old.kind : kinds[0];
+        }
+        return {
+          id: old?.id || `item-${Date.now()}-${i}-${Math.random().toString(36).substring(2, 6)}`,
+          kind,
+          size: old?.size || 'L',
+          number: old?.number,
+        };
+      })
     );
-  }, [jerseyType]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slotKey, jerseyType, isOpen, recordToEdit]);
 
   if (!isOpen) return null;
-
-  const parsedPrice = parseFloat(unitPrice) || 0;
-  const parsedPaid = parseFloat(amountPaid) || 0;
-  const calculatedBalance = Math.max(0, parsedPrice - parsedPaid);
 
   const handlePaidChange = (val: string) => {
     setAmountPaid(val);
@@ -205,21 +230,11 @@ export const JerseyFormModal: React.FC<JerseyFormModalProps> = ({
   const updateItem = (id: string, patch: Partial<JerseyItem>) =>
     setItems((prev) => prev.map((it) => (it.id === id ? { ...it, ...patch } : it)));
 
-  const addItem = () =>
-    setItems((prev) => [
-      ...prev,
-      {
-        id: `item-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-        kind: prev.length ? prev[prev.length - 1].kind : kindOptions[0],
-        size: prev.length ? prev[prev.length - 1].size : 'L',
-      },
-    ]);
-
-  const removeItem = (id: string) => setItems((prev) => (prev.length > 1 ? prev.filter((it) => it.id !== id) : prev));
+  const itemsReady = !!counts && items.length === slots.length && items.length > 0;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!memberRef.trim() || docBusy) return;
+    if (!memberRef.trim() || docBusy || !itemsReady) return;
 
     const isNew = !recordToEdit;
     const record: JerseyRecord = {
@@ -330,87 +345,97 @@ export const JerseyFormModal: React.FC<JerseyFormModalProps> = ({
             </select>
           </div>
 
+          {/* Order total decides the pairs and solos */}
+          <div className="rounded-xl border border-indigo-200 dark:border-indigo-900 bg-indigo-50/40 dark:bg-indigo-950/20 p-3 space-y-2">
+            <label className={labelClass}>Order Total Price (decides pairs and solos)</label>
+            <input
+              type="number"
+              step="0.01"
+              required
+              value={unitPrice}
+              onChange={(e) => setUnitPrice(e.target.value)}
+              placeholder={`${SOLO_PRICE} = solo, ${PAIR_PRICE} = pair`}
+              className={`${fieldClass} font-mono`}
+            />
+            {counts ? (
+              <p className="text-xs font-semibold text-indigo-700 dark:text-indigo-300">
+                {describeCounts(counts)} · {piecesFor(counts)} piece{piecesFor(counts) === 1 ? '' : 's'}
+              </p>
+            ) : priceInvalid ? (
+              <p className="text-xs font-semibold text-rose-500">
+                ₱{parsedPrice.toFixed(2)} does not match any order. Use ₱{PAIR_PRICE} for each pair and ₱{SOLO_PRICE} for each
+                solo (for example ₱{SOLO_PRICE}, ₱{PAIR_PRICE}, ₱{PAIR_PRICE + SOLO_PRICE}, ₱{PAIR_PRICE * 2}).
+              </p>
+            ) : (
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Enter the full price of the order. ₱{SOLO_PRICE} is a solo, ₱{PAIR_PRICE} is a pair, ₱{PAIR_PRICE + SOLO_PRICE} is a
+                pair + a solo.
+              </p>
+            )}
+          </div>
+
           {/* Pieces in this order */}
-          <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 space-y-2">
-            <div className="flex items-center justify-between">
+          {counts && (
+            <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 space-y-2">
               <span className="text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
                 Pieces in this order
               </span>
-              <button
-                type="button"
-                onClick={addItem}
-                className="text-xs font-semibold text-indigo-600 dark:text-indigo-300 hover:underline"
-              >
-                + Add piece
-              </button>
+
+              {itemsReady &&
+                items.map((it, idx) => {
+                  const slot = slots[idx];
+                  const locked = !!slot?.fixedKind;
+                  return (
+                    <div key={it.id} className="grid grid-cols-12 gap-2 items-center">
+                      <span className="col-span-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                        {slot?.label}
+                      </span>
+                      {locked ? (
+                        <div className={`${fieldClass} col-span-5 font-semibold`}>{it.kind}</div>
+                      ) : (
+                        <select
+                          value={it.kind}
+                          onChange={(e) => updateItem(it.id, { kind: e.target.value })}
+                          className={`${fieldClass} col-span-5`}
+                        >
+                          {(kindOptions.includes(it.kind) ? kindOptions : [...kindOptions, it.kind]).map((k) => (
+                            <option key={k} value={k}>
+                              {k}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                      <select
+                        value={it.size}
+                        onChange={(e) => updateItem(it.id, { size: e.target.value })}
+                        className={`${fieldClass} col-span-2 font-bold`}
+                      >
+                        {SIZES.map((sz) => (
+                          <option key={sz} value={sz}>
+                            {sz}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        type="text"
+                        value={it.number || ''}
+                        onChange={(e) => updateItem(it.id, { number: e.target.value })}
+                        placeholder="No."
+                        className={`${fieldClass} col-span-3 font-mono`}
+                      />
+                    </div>
+                  );
+                })}
+
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                {isPairedType(jerseyType)
+                  ? 'Each pair is 1 MOL Blue + 1 MMC White. A solo can be either shirt.'
+                  : 'A pair is any two pieces (shirt + short, or 2 shirts). A solo is one shirt or one short.'}
+              </p>
             </div>
+          )}
 
-            {items.map((it, idx) => (
-              <div key={it.id} className="grid grid-cols-12 gap-2 items-center">
-                <span className="col-span-1 text-[11px] text-slate-400">{idx + 1}.</span>
-                <select
-                  value={it.kind}
-                  onChange={(e) => updateItem(it.id, { kind: e.target.value })}
-                  className={`${fieldClass} col-span-5`}
-                >
-                  {(kindOptions.includes(it.kind) ? kindOptions : [...kindOptions, it.kind]).map((k) => (
-                    <option key={k} value={k}>
-                      {k}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  value={it.size}
-                  onChange={(e) => updateItem(it.id, { size: e.target.value })}
-                  className={`${fieldClass} col-span-2 font-bold`}
-                >
-                  {SIZES.map((sz) => (
-                    <option key={sz} value={sz}>
-                      {sz}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  type="text"
-                  value={it.number || ''}
-                  onChange={(e) => updateItem(it.id, { number: e.target.value })}
-                  placeholder="No."
-                  className={`${fieldClass} col-span-3 font-mono`}
-                />
-                <button
-                  type="button"
-                  onClick={() => removeItem(it.id)}
-                  disabled={items.length === 1}
-                  className="col-span-1 text-rose-500 hover:text-rose-600 disabled:opacity-30"
-                  title="Remove piece"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            ))}
-
-            <p className="text-[11px] text-slate-500 dark:text-slate-400">
-              {items.length} piece{items.length === 1 ? '' : 's'}: {describePieces(items.length)} · price list: solo ₱
-              {SOLO_PRICE}, pair ₱{PAIR_PRICE} (any two pieces)
-            </p>
-          </div>
-
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className={labelClass}>Order Total Price</label>
-              <input
-                type="number"
-                step="0.01"
-                required
-                value={unitPrice}
-                onChange={(e) => {
-                  setPriceManual(true);
-                  setUnitPrice(e.target.value);
-                }}
-                className={`${fieldClass} font-mono`}
-              />
-            </div>
-
+          <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={labelClass}>Amount Paid</label>
               <input
@@ -563,7 +588,7 @@ export const JerseyFormModal: React.FC<JerseyFormModalProps> = ({
               </button>
               <button
                 type="submit"
-                disabled={docBusy}
+                disabled={docBusy || !itemsReady}
                 className="px-5 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 rounded-xl"
               >
                 {recordToEdit ? 'Save Changes' : 'Create Jersey Order'}
