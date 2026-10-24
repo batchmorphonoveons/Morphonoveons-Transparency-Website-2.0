@@ -11,6 +11,7 @@ import {
   FinancialRecord,
   DocumentAttachment
 } from '../types/transparency';
+import { SIZES, kindsForType, describePieces, getOrderItems } from '../jerseyPricing';
 
 const SECTION_GROUPS = [
   { label: 'MT1', sections: ['MT1-A', 'MT1-B', 'MT1-C', 'MT1-D'] },
@@ -99,6 +100,10 @@ export const JerseyRecordsView: React.FC<JerseyRecordsViewProps> = ({
 
   // Individual order metrics
   const totalOrdersCount = currentJerseyOrders.length;
+  const totalPieces = useMemo(
+    () => currentJerseyOrders.reduce((sum, r) => sum + getOrderItems(r).length, 0),
+    [currentJerseyOrders]
+  );
   const totalOutstandingMemberBalances = useMemo(() => {
     return currentJerseyOrders.reduce((sum, r) => sum + r.balance, 0);
   }, [currentJerseyOrders]);
@@ -119,13 +124,56 @@ export const JerseyRecordsView: React.FC<JerseyRecordsViewProps> = ({
     };
   }, [currentJerseyOrders]);
 
+  // What the supplier needs: pieces per item and size, and per section
+  const supplierSummary = useMemo(() => {
+    const allKinds = [...kindsForType(jerseyType)];
+    currentJerseyOrders.forEach((r) =>
+      getOrderItems(r).forEach((i) => {
+        if (!allKinds.includes(i.kind)) allKinds.push(i.kind);
+      })
+    );
+    const bySize: Record<string, Record<string, number>> = {};
+    allKinds.forEach((k) => {
+      bySize[k] = {};
+    });
+    let pairs = 0;
+    let solos = 0;
+    const secRows = ALL_SECTIONS.map((sec) => ({
+      section: sec,
+      byKind: {} as Record<string, number>,
+      pieces: 0,
+      pairs: 0,
+      solos: 0,
+    }));
+    currentJerseyOrders.forEach((r) => {
+      const items = getOrderItems(r);
+      const n = items.length;
+      pairs += Math.floor(n / 2);
+      solos += n % 2;
+      items.forEach((i) => {
+        bySize[i.kind][i.size] = (bySize[i.kind][i.size] || 0) + 1;
+      });
+      const row = secRows.find((x) => x.section === r.section);
+      if (row) {
+        items.forEach((i) => {
+          row.byKind[i.kind] = (row.byKind[i.kind] || 0) + 1;
+        });
+        row.pieces += n;
+        row.pairs += Math.floor(n / 2);
+        row.solos += n % 2;
+      }
+    });
+    return { allKinds, bySize, pairs, solos, secRows };
+  }, [currentJerseyOrders, jerseyType]);
+
   // Totals per section
   const sectionSummary = useMemo(() => {
     const rows = ALL_SECTIONS.map((sec) => {
       const orders = currentJerseyOrders.filter((r) => r.section === sec);
       return {
         section: sec,
-        units: orders.length,
+        orders: orders.length,
+        units: orders.reduce((sum, r) => sum + getOrderItems(r).length, 0),
         paid: orders.reduce((sum, r) => sum + r.amountPaid, 0),
         balance: orders.reduce((sum, r) => sum + r.balance, 0),
       };
@@ -142,14 +190,15 @@ export const JerseyRecordsView: React.FC<JerseyRecordsViewProps> = ({
         const matchesNum = r.jerseyNumber?.toLowerCase().includes(q);
         const matchesSupp = r.supplierName?.toLowerCase().includes(q);
         const matchesSection = r.section?.toLowerCase().includes(q);
-        if (!matchesRef && !matchesNum && !matchesSupp && !matchesSection) return false;
+        const matchesKind = getOrderItems(r).some((i) => i.kind.toLowerCase().includes(q));
+        if (!matchesRef && !matchesNum && !matchesSupp && !matchesSection && !matchesKind) return false;
       }
       if (sectionFilter === 'none') {
         if (r.section && ALL_SECTIONS.includes(r.section)) return false;
       } else if (sectionFilter !== 'all' && r.section !== sectionFilter) {
         return false;
       }
-      if (sizeFilter !== 'all' && r.jerseySize !== sizeFilter) return false;
+      if (sizeFilter !== 'all' && !getOrderItems(r).some((i) => i.size === sizeFilter)) return false;
       if (statusFilter !== 'all' && r.paymentStatus !== statusFilter) return false;
       if (supplierFilter !== 'all' && r.supplierPaymentStatus !== supplierFilter) return false;
       return true;
@@ -243,7 +292,7 @@ export const JerseyRecordsView: React.FC<JerseyRecordsViewProps> = ({
             Orders / Pending Receivables
           </div>
           <div className="text-xl font-bold text-slate-900 dark:text-white mt-1">
-            {totalOrdersCount} Units
+            {totalPieces} Pieces <span className="text-xs font-medium text-slate-400">· {totalOrdersCount} orders</span>
           </div>
           <div className="text-[11px] font-mono text-amber-600 dark:text-amber-400 mt-1">
             Pending dues: {peso(totalOutstandingMemberBalances)}
@@ -320,7 +369,7 @@ export const JerseyRecordsView: React.FC<JerseyRecordsViewProps> = ({
               }`}
             >
               <div className="text-xs font-bold font-mono text-slate-900 dark:text-white">{row.section}</div>
-              <div className="text-lg font-black text-slate-900 dark:text-white">{row.units} <span className="text-[11px] font-medium text-slate-400">units</span></div>
+              <div className="text-lg font-black text-slate-900 dark:text-white">{row.units} <span className="text-[11px] font-medium text-slate-400">pieces · {row.orders} orders</span></div>
               <div className="text-[11px] font-mono text-emerald-600 dark:text-emerald-400">Paid {peso(row.paid)}</div>
               <div className="text-[11px] font-mono text-amber-600 dark:text-amber-400">Due {peso(row.balance)}</div>
             </button>
@@ -331,6 +380,82 @@ export const JerseyRecordsView: React.FC<JerseyRecordsViewProps> = ({
             {sectionSummary.unassignedCount} order(s) have no section yet.
           </p>
         )}
+      </div>
+
+      {/* Supplier order summary */}
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 sm:p-5 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white">Supplier Order Summary</h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Pieces to order by item and size, counted from every order
+            </p>
+          </div>
+          <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+            {totalPieces} pieces · {supplierSummary.pairs} pairs · {supplierSummary.solos} solo
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs text-left">
+            <thead className="bg-slate-100/75 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold">
+              <tr>
+                <th className="py-2 px-3">Item</th>
+                {SIZES.map((sz) => (
+                  <th key={sz} className="py-2 px-3 text-center">{sz}</th>
+                ))}
+                <th className="py-2 px-3 text-center">Total</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+              {supplierSummary.allKinds.map((kind) => {
+                const rowTotal = SIZES.reduce((sum, sz) => sum + (supplierSummary.bySize[kind][sz] || 0), 0);
+                return (
+                  <tr key={kind}>
+                    <td className="py-2 px-3 font-semibold text-slate-900 dark:text-white whitespace-nowrap">{kind}</td>
+                    {SIZES.map((sz) => (
+                      <td key={sz} className="py-2 px-3 text-center font-mono text-slate-700 dark:text-slate-300">
+                        {supplierSummary.bySize[kind][sz] || '—'}
+                      </td>
+                    ))}
+                    <td className="py-2 px-3 text-center font-mono font-bold text-slate-900 dark:text-white">{rowTotal}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs text-left">
+            <thead className="bg-slate-100/75 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold">
+              <tr>
+                <th className="py-2 px-3">Section</th>
+                {supplierSummary.allKinds.map((kind) => (
+                  <th key={kind} className="py-2 px-3 text-center whitespace-nowrap">{kind}</th>
+                ))}
+                <th className="py-2 px-3 text-center">Pieces</th>
+                <th className="py-2 px-3 text-center">Pairs</th>
+                <th className="py-2 px-3 text-center">Solo</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+              {supplierSummary.secRows.map((row) => (
+                <tr key={row.section}>
+                  <td className="py-2 px-3 font-mono font-bold text-slate-900 dark:text-white">{row.section}</td>
+                  {supplierSummary.allKinds.map((kind) => (
+                    <td key={kind} className="py-2 px-3 text-center font-mono text-slate-700 dark:text-slate-300">
+                      {row.byKind[kind] || '—'}
+                    </td>
+                  ))}
+                  <td className="py-2 px-3 text-center font-mono font-bold text-slate-900 dark:text-white">{row.pieces}</td>
+                  <td className="py-2 px-3 text-center font-mono">{row.pairs}</td>
+                  <td className="py-2 px-3 text-center font-mono">{row.solos}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Jersey Order Roster Table */}
@@ -395,8 +520,7 @@ export const JerseyRecordsView: React.FC<JerseyRecordsViewProps> = ({
               <tr>
                 <th className="py-3 px-4">Member / Unit Code</th>
                 <th className="py-3 px-4 text-center">Section</th>
-                <th className="py-3 px-4 text-center">Jersey #</th>
-                <th className="py-3 px-4 text-center">Size</th>
+                <th className="py-3 px-4">Items</th>
                 <th className="py-3 px-4 text-right">Price</th>
                 <th className="py-3 px-4 text-right">Paid</th>
                 <th className="py-3 px-4 text-right">Balance Due</th>
@@ -423,13 +547,15 @@ export const JerseyRecordsView: React.FC<JerseyRecordsViewProps> = ({
                         <span className="text-slate-400">—</span>
                       )}
                     </td>
-                    <td className="py-3 px-4 text-center font-mono font-bold text-indigo-600 dark:text-indigo-400">
-                      {order.jerseyNumber || '—'}
-                    </td>
-                    <td className="py-3 px-4 text-center">
-                      <span className="px-2 py-0.5 rounded font-mono font-semibold bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200">
-                        {order.jerseySize}
-                      </span>
+                    <td className="py-3 px-4 min-w-[220px]">
+                      <div className="font-semibold text-slate-900 dark:text-white">
+                        {describePieces(getOrderItems(order).length)}
+                      </div>
+                      <div className="text-slate-500 dark:text-slate-400">
+                        {getOrderItems(order)
+                          .map((i) => `${i.kind} (${i.size}${i.number ? ' #' + i.number : ''})`)
+                          .join(' + ')}
+                      </div>
                     </td>
                     <td className="py-3 px-4 text-right font-mono">₱{order.unitPrice.toFixed(2)}</td>
                     <td className="py-3 px-4 text-right font-mono text-emerald-600 dark:text-emerald-400 font-semibold">
@@ -526,7 +652,7 @@ export const JerseyRecordsView: React.FC<JerseyRecordsViewProps> = ({
                 ))
               ) : (
                 <tr>
-                  <td colSpan={isAdmin ? 12 : 11} className="py-8 text-center text-slate-500 text-xs">
+                  <td colSpan={isAdmin ? 11 : 10} className="py-8 text-center text-slate-500 text-xs">
                     No jersey records found for this filter.
                   </td>
                 </tr>
