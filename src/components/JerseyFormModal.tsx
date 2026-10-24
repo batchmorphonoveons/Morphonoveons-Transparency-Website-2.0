@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Shirt, Paperclip, Trash2 } from 'lucide-react';
 import { JerseyRecord, DocumentAttachment } from '../types/transparency';
+import { SIZES, SOLO_PRICE, PAIR_PRICE, JerseyItem, kindsForType, priceFor, describePieces, getOrderItems } from '../jerseyPricing';
 
 interface JerseyFormModalProps {
   isOpen: boolean;
@@ -68,8 +69,8 @@ export const JerseyFormModal: React.FC<JerseyFormModalProps> = ({
   const [jerseyType, setJerseyType] = useState<'batch_jersey' | 'mol_blue' | 'mmc_white'>(defaultJerseyType);
   const [memberRef, setMemberRef] = useState('');
   const [section, setSection] = useState('');
-  const [jerseyNumber, setJerseyNumber] = useState('');
-  const [jerseySize, setJerseySize] = useState<JerseyRecord['jerseySize']>('L');
+  const [items, setItems] = useState<JerseyItem[]>([]);
+  const [priceManual, setPriceManual] = useState(false);
   const [unitPrice, setUnitPrice] = useState<string>('');
   const [amountPaid, setAmountPaid] = useState<string>('');
   const [paymentStatus, setPaymentStatus] = useState<JerseyRecord['paymentStatus']>('Unpaid');
@@ -87,8 +88,8 @@ export const JerseyFormModal: React.FC<JerseyFormModalProps> = ({
       setJerseyType(recordToEdit.jerseyType);
       setMemberRef(recordToEdit.memberRef);
       setSection((recordToEdit as any).section || '');
-      setJerseyNumber(recordToEdit.jerseyNumber || '');
-      setJerseySize(recordToEdit.jerseySize);
+      setItems(getOrderItems(recordToEdit));
+      setPriceManual(true);
       setUnitPrice(recordToEdit.unitPrice.toString());
       setAmountPaid(recordToEdit.amountPaid.toString());
       setPaymentStatus(recordToEdit.paymentStatus);
@@ -100,9 +101,9 @@ export const JerseyFormModal: React.FC<JerseyFormModalProps> = ({
       setJerseyType(defaultJerseyType);
       setMemberRef('');
       setSection('');
-      setJerseyNumber('');
-      setJerseySize('L');
-      setUnitPrice('');
+      setItems([{ id: `item-${Date.now()}`, kind: kindsForType(defaultJerseyType)[0], size: 'L' }]);
+      setPriceManual(false);
+      setUnitPrice(String(priceFor(1)));
       setAmountPaid('');
       setPaymentStatus('Unpaid');
       setSupplierStatus('Pending');
@@ -114,6 +115,19 @@ export const JerseyFormModal: React.FC<JerseyFormModalProps> = ({
     setDocError('');
     setShowDeleteConfirm(false);
   }, [recordToEdit, defaultJerseyType, isOpen]);
+
+  // Price follows the number of pieces (pairs and solos) until the price is typed in by hand
+  useEffect(() => {
+    if (!priceManual && items.length > 0) setUnitPrice(String(priceFor(items.length)));
+  }, [items.length, priceManual]);
+
+  // When the division changes, move any piece whose item type no longer fits
+  useEffect(() => {
+    const kinds = kindsForType(jerseyType);
+    setItems((prev) =>
+      prev.map((it) => (kinds.includes(it.kind) || it.kind === 'Not specified' ? it : { ...it, kind: kinds[0] }))
+    );
+  }, [jerseyType]);
 
   if (!isOpen) return null;
 
@@ -186,6 +200,23 @@ export const JerseyFormModal: React.FC<JerseyFormModalProps> = ({
     setDocuments((prev) => prev.filter((d) => d.id !== id));
   };
 
+  const kindOptions = kindsForType(jerseyType);
+
+  const updateItem = (id: string, patch: Partial<JerseyItem>) =>
+    setItems((prev) => prev.map((it) => (it.id === id ? { ...it, ...patch } : it)));
+
+  const addItem = () =>
+    setItems((prev) => [
+      ...prev,
+      {
+        id: `item-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        kind: prev.length ? prev[prev.length - 1].kind : kindOptions[0],
+        size: prev.length ? prev[prev.length - 1].size : 'L',
+      },
+    ]);
+
+  const removeItem = (id: string) => setItems((prev) => (prev.length > 1 ? prev.filter((it) => it.id !== id) : prev));
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!memberRef.trim() || docBusy) return;
@@ -196,8 +227,9 @@ export const JerseyFormModal: React.FC<JerseyFormModalProps> = ({
       jerseyType,
       memberRef: memberRef.trim(),
       section: section || undefined,
-      jerseyNumber: jerseyNumber.trim() || undefined,
-      jerseySize,
+      jerseyNumber: items.map((i) => (i.number || '').trim()).filter(Boolean).join(', ') || undefined,
+      jerseySize: (items[0]?.size || 'L') as JerseyRecord['jerseySize'],
+      items: items.map((i) => ({ ...i, number: (i.number || '').trim() || undefined })),
       unitPrice: parsedPrice,
       amountPaid: parsedPaid,
       balance: calculatedBalance,
@@ -298,45 +330,83 @@ export const JerseyFormModal: React.FC<JerseyFormModalProps> = ({
             </select>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={labelClass}>Jersey Size</label>
-              <select
-                value={jerseySize}
-                onChange={(e) => setJerseySize(e.target.value as any)}
-                className={`${fieldClass} font-bold`}
+          {/* Pieces in this order */}
+          <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                Pieces in this order
+              </span>
+              <button
+                type="button"
+                onClick={addItem}
+                className="text-xs font-semibold text-indigo-600 dark:text-indigo-300 hover:underline"
               >
-                <option value="XS">XS (Extra Small)</option>
-                <option value="S">S (Small)</option>
-                <option value="M">M (Medium)</option>
-                <option value="L">L (Large)</option>
-                <option value="XL">XL (Extra Large)</option>
-                <option value="2XL">2XL (Double XL)</option>
-                <option value="3XL">3XL (Triple XL)</option>
-              </select>
+                + Add piece
+              </button>
             </div>
 
-            <div>
-              <label className={labelClass}>Printed Number</label>
-              <input
-                type="text"
-                value={jerseyNumber}
-                onChange={(e) => setJerseyNumber(e.target.value)}
-                placeholder="Optional"
-                className={`${fieldClass} font-mono font-bold`}
-              />
-            </div>
+            {items.map((it, idx) => (
+              <div key={it.id} className="grid grid-cols-12 gap-2 items-center">
+                <span className="col-span-1 text-[11px] text-slate-400">{idx + 1}.</span>
+                <select
+                  value={it.kind}
+                  onChange={(e) => updateItem(it.id, { kind: e.target.value })}
+                  className={`${fieldClass} col-span-5`}
+                >
+                  {(kindOptions.includes(it.kind) ? kindOptions : [...kindOptions, it.kind]).map((k) => (
+                    <option key={k} value={k}>
+                      {k}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={it.size}
+                  onChange={(e) => updateItem(it.id, { size: e.target.value })}
+                  className={`${fieldClass} col-span-2 font-bold`}
+                >
+                  {SIZES.map((sz) => (
+                    <option key={sz} value={sz}>
+                      {sz}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="text"
+                  value={it.number || ''}
+                  onChange={(e) => updateItem(it.id, { number: e.target.value })}
+                  placeholder="No."
+                  className={`${fieldClass} col-span-3 font-mono`}
+                />
+                <button
+                  type="button"
+                  onClick={() => removeItem(it.id)}
+                  disabled={items.length === 1}
+                  className="col-span-1 text-rose-500 hover:text-rose-600 disabled:opacity-30"
+                  title="Remove piece"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
+
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              {items.length} piece{items.length === 1 ? '' : 's'}: {describePieces(items.length)} · price list: solo ₱
+              {SOLO_PRICE}, pair ₱{PAIR_PRICE} (any two pieces)
+            </p>
           </div>
 
           <div className="grid grid-cols-3 gap-3">
             <div>
-              <label className={labelClass}>Unit Price</label>
+              <label className={labelClass}>Order Total Price</label>
               <input
                 type="number"
                 step="0.01"
                 required
                 value={unitPrice}
-                onChange={(e) => setUnitPrice(e.target.value)}
+                onChange={(e) => {
+                  setPriceManual(true);
+                  setUnitPrice(e.target.value);
+                }}
                 className={`${fieldClass} font-mono`}
               />
             </div>
