@@ -11,7 +11,7 @@ import {
   FinancialRecord,
   DocumentAttachment
 } from '../types/transparency';
-import { SIZES, kindsForType, describePieces, getOrderItems } from '../jerseyPricing';
+import { SIZES, kindsForType, describeOrder, getOrderCounts, getOrderItems } from '../jerseyPricing';
 
 const SECTION_GROUPS = [
   { label: 'MT1', sections: ['MT1-A', 'MT1-B', 'MT1-C', 'MT1-D'] },
@@ -124,7 +124,8 @@ export const JerseyRecordsView: React.FC<JerseyRecordsViewProps> = ({
     };
   }, [currentJerseyOrders]);
 
-  // What the supplier needs: pieces per item and size, and per section
+  // What the supplier needs: pieces per item and size, and pairs/solos per section.
+  // Pairs and solos come from each order's total price (1000 = pair, 525 = solo).
   const supplierSummary = useMemo(() => {
     const allKinds = [...kindsForType(jerseyType)];
     currentJerseyOrders.forEach((r) =>
@@ -148,8 +149,9 @@ export const JerseyRecordsView: React.FC<JerseyRecordsViewProps> = ({
     currentJerseyOrders.forEach((r) => {
       const items = getOrderItems(r);
       const n = items.length;
-      pairs += Math.floor(n / 2);
-      solos += n % 2;
+      const c = getOrderCounts(r);
+      pairs += c.pairs;
+      solos += c.solos;
       items.forEach((i) => {
         bySize[i.kind][i.size] = (bySize[i.kind][i.size] || 0) + 1;
       });
@@ -159,8 +161,8 @@ export const JerseyRecordsView: React.FC<JerseyRecordsViewProps> = ({
           row.byKind[i.kind] = (row.byKind[i.kind] || 0) + 1;
         });
         row.pieces += n;
-        row.pairs += Math.floor(n / 2);
-        row.solos += n % 2;
+        row.pairs += c.pairs;
+        row.solos += c.solos;
       }
     });
     return { allKinds, bySize, pairs, solos, secRows };
@@ -549,7 +551,7 @@ export const JerseyRecordsView: React.FC<JerseyRecordsViewProps> = ({
                     </td>
                     <td className="py-3 px-4 min-w-[220px]">
                       <div className="font-semibold text-slate-900 dark:text-white">
-                        {describePieces(getOrderItems(order).length)}
+                        {describeOrder(order)}
                       </div>
                       <div className="text-slate-500 dark:text-slate-400">
                         {getOrderItems(order)
