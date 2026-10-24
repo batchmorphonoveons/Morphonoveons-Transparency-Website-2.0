@@ -1,338 +1,482 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { X, Shirt, Paperclip, Trash2 } from 'lucide-react';
-import { JerseyRecord, DocumentAttachment } from '../types/transparency';
+import React, { useState, useMemo } from 'react';
 import {
-  SIZES,
-  SOLO_PRICE,
-  PAIR_PRICE,
-  JerseyItem,
-  kindsForType,
-  isPairedType,
-  solveOrder,
-  buildSlots,
-  describeCounts,
-  piecesFor,
-  getOrderItems,
-} from '../jerseyPricing';
+  Plus,
+  Search,
+  Edit3,
+  Trash2,
+  Paperclip
+} from 'lucide-react';
+import {
+  JerseyRecord,
+  FinancialRecord,
+  DocumentAttachment
+} from '../types/transparency';
+import { SIZES, kindsForType, describeOrder, getOrderCounts, getOrderItems } from '../jerseyPricing';
 
-interface JerseyFormModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  recordToEdit: JerseyRecord | null;
-  defaultJerseyType?: 'batch_jersey' | 'mol_blue' | 'mmc_white';
-  onSave: (record: JerseyRecord, isNew: boolean, prevSnapshot?: JerseyRecord) => void;
-  onDelete?: (recordId: string, recordSnapshot: JerseyRecord) => void;
-}
-
-const DOC_TYPES = ['Proof of Payment', 'Receipt', 'Supplier Invoice', 'Collection Sheet', 'Other'];
-const MAX_TOTAL_CHARS = 700000; // keeps each order well under the 1 MB database limit
-const MAX_PDF_BYTES = 350000;
 const SECTION_GROUPS = [
   { label: 'MT1', sections: ['MT1-A', 'MT1-B', 'MT1-C', 'MT1-D'] },
   { label: 'MarE1', sections: ['MarE1-A', 'MarE1-B', 'MarE1-C', 'MarE1-D'] },
 ];
+const ALL_SECTIONS = SECTION_GROUPS.flatMap((g) => g.sections);
 
-const readAsDataUrl = (file: File): Promise<string> =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(new Error('Could not read file'));
-    reader.readAsDataURL(file);
-  });
+const peso = (n: number) =>
+  `₱${n.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
 
-// Shrinks a photo so it stays small enough to save
-const compressImage = (file: File): Promise<string> =>
-  new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = () => {
-      const attempt = (maxSide: number, quality: number) => {
-        const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.round(img.width * scale);
-        canvas.height = Math.round(img.height * scale);
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return '';
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        return canvas.toDataURL('image/jpeg', quality);
-      };
-      let out = attempt(1200, 0.7);
-      if (out.length > 250000) out = attempt(900, 0.55);
-      URL.revokeObjectURL(url);
-      out ? resolve(out) : reject(new Error('Could not process image'));
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error('Could not open image'));
-    };
-    img.src = url;
-  });
+interface JerseyRecordsViewProps {
+  jerseyType: 'batch_jersey' | 'mol_blue' | 'mmc_white';
+  title: string;
+  subtitle: string;
+  themeColor: string;
+  isAdmin: boolean;
+  jerseyRecords: JerseyRecord[];
+  financialRecords: FinancialRecord[];
+  onOpenAddOrder: () => void;
+  onOpenAddFinancial: (type: 'collection' | 'expense') => void;
+  onEditJersey: (record: JerseyRecord) => void;
+  onDeleteJersey: (id: string, record: JerseyRecord) => void;
+  onQuickUpdateStatus: (id: string, newStatus: 'Paid' | 'Partially Paid' | 'Unpaid') => void;
+  onQuickUpdateSupplier: (id: string, newStatus: 'Completed' | 'Pending') => void;
+  onEditFinancial: (record: FinancialRecord) => void;
+  onDeleteFinancial: (id: string, record: FinancialRecord) => void;
+  onViewDocument: (doc: DocumentAttachment, title: string, docs?: DocumentAttachment[]) => void;
+}
 
-export const JerseyFormModal: React.FC<JerseyFormModalProps> = ({
-  isOpen,
-  onClose,
-  recordToEdit,
-  defaultJerseyType = 'batch_jersey',
-  onSave,
-  onDelete,
+export const JerseyRecordsView: React.FC<JerseyRecordsViewProps> = ({
+  jerseyType,
+  title,
+  subtitle,
+  themeColor,
+  isAdmin,
+  jerseyRecords,
+  financialRecords,
+  onOpenAddOrder,
+  onOpenAddFinancial,
+  onEditJersey,
+  onDeleteJersey,
+  onQuickUpdateStatus,
+  onQuickUpdateSupplier,
+  onEditFinancial,
+  onDeleteFinancial,
+  onViewDocument,
 }) => {
-  const [jerseyType, setJerseyType] = useState<'batch_jersey' | 'mol_blue' | 'mmc_white'>(defaultJerseyType);
-  const [memberRef, setMemberRef] = useState('');
-  const [section, setSection] = useState('');
-  const [items, setItems] = useState<JerseyItem[]>([]);
-  const [unitPrice, setUnitPrice] = useState<string>('');
-  const [amountPaid, setAmountPaid] = useState<string>('');
-  const [paymentStatus, setPaymentStatus] = useState<JerseyRecord['paymentStatus']>('Unpaid');
-  const [supplierStatus, setSupplierStatus] = useState<JerseyRecord['supplierPaymentStatus']>('Pending');
-  const [supplierName, setSupplierName] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [documents, setDocuments] = useState<DocumentAttachment[]>([]);
-  const [docType, setDocType] = useState('Proof of Payment');
-  const [docError, setDocError] = useState('');
-  const [docBusy, setDocBusy] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [sizeFilter, setSizeFilter] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [supplierFilter, setSupplierFilter] = useState<string>('all');
+  const [sectionFilter, setSectionFilter] = useState<string>('all');
 
-  const parsedPrice = parseFloat(unitPrice) || 0;
-  const parsedPaid = parseFloat(amountPaid) || 0;
-  const calculatedBalance = Math.max(0, parsedPrice - parsedPaid);
+  // Filter jersey records for this type
+  const currentJerseyOrders = useMemo(() => {
+    return jerseyRecords.filter((r) =>
+      jerseyType === 'mol_blue'
+        ? r.jerseyType === 'mol_blue' || r.jerseyType === 'mmc_white'
+        : r.jerseyType === jerseyType
+    );
+  }, [jerseyRecords, jerseyType]);
 
-  // The order total decides how many pairs and solos the order has
-  const counts = useMemo(() => solveOrder(parsedPrice), [parsedPrice]);
-  const slots = useMemo(() => (counts ? buildSlots(counts, jerseyType) : []), [counts, jerseyType]);
-  const slotKey = slots.map((s) => `${s.group}:${s.fixedKind || ''}`).join('|');
-  const priceInvalid = unitPrice.trim() !== '' && !counts;
+  // Filter financial records for this jersey category
+  const currentFinRecords = useMemo(() => {
+    return financialRecords.filter((r) =>
+      jerseyType === 'mol_blue'
+        ? r.category === 'mol_blue' || r.category === 'mmc_white'
+        : r.category === jerseyType
+    );
+  }, [financialRecords, jerseyType]);
 
-  useEffect(() => {
-    if (recordToEdit) {
-      setJerseyType(recordToEdit.jerseyType);
-      setMemberRef(recordToEdit.memberRef);
-      setSection((recordToEdit as any).section || '');
-      setItems(getOrderItems(recordToEdit));
-      setUnitPrice(recordToEdit.unitPrice.toString());
-      setAmountPaid(recordToEdit.amountPaid.toString());
-      setPaymentStatus(recordToEdit.paymentStatus);
-      setSupplierStatus(recordToEdit.supplierPaymentStatus);
-      setSupplierName(recordToEdit.supplierName || '');
-      setDate(recordToEdit.date);
-      setDocuments(recordToEdit.documents || []);
-    } else {
-      setJerseyType(defaultJerseyType);
-      setMemberRef('');
-      setSection('');
-      setItems([]);
-      setUnitPrice('');
-      setAmountPaid('');
-      setPaymentStatus('Unpaid');
-      setSupplierStatus('Pending');
-      setSupplierName('');
-      setDate(new Date().toISOString().split('T')[0]);
-      setDocuments([]);
-    }
-    setDocType('Proof of Payment');
-    setDocError('');
-    setShowDeleteConfirm(false);
-  }, [recordToEdit, defaultJerseyType, isOpen]);
+  // Overall financial calculations
+  const totalCollections = useMemo(() => {
+    return currentFinRecords
+      .filter((r) => r.type === 'collection')
+      .reduce((sum, r) => sum + r.amount, 0);
+  }, [currentFinRecords]);
 
-  // Keep the piece rows matched to the order total (2 per pair, 1 per solo).
-  // Rows keep their size and number by position. While the total is not valid, nothing changes.
-  useEffect(() => {
-    if (!counts) return;
-    const kinds = kindsForType(jerseyType);
-    setItems((prev) =>
-      slots.map((slot, i) => {
-        const old = prev[i];
-        let kind = slot.fixedKind;
-        if (!kind) {
-          kind = old && (kinds.includes(old.kind) || old.kind === 'Not specified') ? old.kind : kinds[0];
-        }
-        return {
-          id: old?.id || `item-${Date.now()}-${i}-${Math.random().toString(36).substring(2, 6)}`,
-          kind,
-          size: old?.size || 'L',
-          number: old?.number,
-        };
+  const totalSupplierDisbursed = useMemo(() => {
+    return currentFinRecords
+      .filter((r) => r.type === 'expense')
+      .reduce((sum, r) => sum + r.amount, 0);
+  }, [currentFinRecords]);
+
+  const availableFundBalance = totalCollections - totalSupplierDisbursed;
+
+  // Individual order metrics
+  const totalOrdersCount = currentJerseyOrders.length;
+  const totalPieces = useMemo(
+    () => currentJerseyOrders.reduce((sum, r) => sum + getOrderItems(r).length, 0),
+    [currentJerseyOrders]
+  );
+  const totalOutstandingMemberBalances = useMemo(() => {
+    return currentJerseyOrders.reduce((sum, r) => sum + r.balance, 0);
+  }, [currentJerseyOrders]);
+
+  // Total paid by members across all orders (counts partial payments too)
+  const paymentSummary = useMemo(() => {
+    const expected = currentJerseyOrders.reduce((sum, r) => sum + r.unitPrice, 0);
+    const paid = currentJerseyOrders.reduce((sum, r) => sum + r.amountPaid, 0);
+    const count = (status: string) => currentJerseyOrders.filter((r) => r.paymentStatus === status).length;
+    return {
+      expected,
+      paid,
+      balance: Math.max(0, expected - paid),
+      paidCount: count('Paid'),
+      partialCount: count('Partially Paid'),
+      unpaidCount: count('Unpaid'),
+      pct: expected > 0 ? Math.min(100, Math.round((paid / expected) * 100)) : 0,
+    };
+  }, [currentJerseyOrders]);
+
+  // What the supplier needs: pieces per item and size, and pairs/solos per section.
+  // Pairs and solos come from each order's total price (1000 = pair, 525 = solo).
+  const supplierSummary = useMemo(() => {
+    const allKinds = [...kindsForType(jerseyType)];
+    currentJerseyOrders.forEach((r) =>
+      getOrderItems(r).forEach((i) => {
+        if (!allKinds.includes(i.kind)) allKinds.push(i.kind);
       })
     );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slotKey, jerseyType, isOpen, recordToEdit]);
-
-  if (!isOpen) return null;
-
-  const handlePaidChange = (val: string) => {
-    setAmountPaid(val);
-    const paid = parseFloat(val) || 0;
-    if (paid >= parsedPrice && parsedPrice > 0) {
-      setPaymentStatus('Paid');
-    } else if (paid > 0) {
-      setPaymentStatus('Partially Paid');
-    } else {
-      setPaymentStatus('Unpaid');
-    }
-  };
-
-  const handleFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    e.target.value = '';
-    if (files.length === 0) return;
-    setDocError('');
-    setDocBusy(true);
-
-    let current = [...documents];
-    for (const file of files) {
-      try {
-        let dataUrl = '';
-        if (file.type.startsWith('image/')) {
-          dataUrl = await compressImage(file);
-        } else if (file.type === 'application/pdf') {
-          if (file.size > MAX_PDF_BYTES) {
-            setDocError(`"${file.name}" is too large. PDFs must be under 350 KB. Please attach a photo or screenshot instead.`);
-            continue;
-          }
-          dataUrl = await readAsDataUrl(file);
-        } else {
-          setDocError(`"${file.name}" is not supported. Attach a photo, screenshot, or small PDF.`);
-          continue;
-        }
-
-        const total = current.reduce((sum, d) => sum + (d.dataUrl?.length || 0), 0) + dataUrl.length;
-        if (total > MAX_TOTAL_CHARS) {
-          setDocError('Too many attachments for one order. Remove one before adding another.');
-          continue;
-        }
-
-        current = [
-          ...current,
-          {
-            id: `doc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-            name: file.name,
-            type: docType,
-            dataUrl,
-            uploadDate: new Date().toISOString().split('T')[0],
-            size: `${Math.max(1, Math.round((dataUrl.length * 0.75) / 1024))} KB`,
-          },
-        ];
-      } catch (err: any) {
-        setDocError(err?.message || 'Could not attach that file.');
+    const bySize: Record<string, Record<string, number>> = {};
+    allKinds.forEach((k) => {
+      bySize[k] = {};
+    });
+    let pairs = 0;
+    let solos = 0;
+    const secRows = ALL_SECTIONS.map((sec) => ({
+      section: sec,
+      byKind: {} as Record<string, number>,
+      pieces: 0,
+      pairs: 0,
+      solos: 0,
+    }));
+    currentJerseyOrders.forEach((r) => {
+      const items = getOrderItems(r);
+      const n = items.length;
+      const c = getOrderCounts(r);
+      pairs += c.pairs;
+      solos += c.solos;
+      items.forEach((i) => {
+        bySize[i.kind][i.size] = (bySize[i.kind][i.size] || 0) + 1;
+      });
+      const row = secRows.find((x) => x.section === r.section);
+      if (row) {
+        items.forEach((i) => {
+          row.byKind[i.kind] = (row.byKind[i.kind] || 0) + 1;
+        });
+        row.pieces += n;
+        row.pairs += c.pairs;
+        row.solos += c.solos;
       }
-    }
-    setDocuments(current);
-    setDocBusy(false);
-  };
+    });
+    return { allKinds, bySize, pairs, solos, secRows };
+  }, [currentJerseyOrders, jerseyType]);
 
-  const removeDocument = (id: string) => {
-    setDocuments((prev) => prev.filter((d) => d.id !== id));
-  };
+  // Totals per section
+  const sectionSummary = useMemo(() => {
+    const rows = ALL_SECTIONS.map((sec) => {
+      const orders = currentJerseyOrders.filter((r) => r.section === sec);
+      return {
+        section: sec,
+        orders: orders.length,
+        units: orders.reduce((sum, r) => sum + getOrderItems(r).length, 0),
+        paid: orders.reduce((sum, r) => sum + r.amountPaid, 0),
+        balance: orders.reduce((sum, r) => sum + r.balance, 0),
+      };
+    });
+    const unassigned = currentJerseyOrders.filter((r) => !r.section || !ALL_SECTIONS.includes(r.section));
+    return { rows, unassignedCount: unassigned.length };
+  }, [currentJerseyOrders]);
 
-  const kindOptions = kindsForType(jerseyType);
+  const filteredOrders = useMemo(() => {
+    return currentJerseyOrders.filter((r) => {
+      if (searchTerm) {
+        const q = searchTerm.toLowerCase();
+        const matchesRef = r.memberRef.toLowerCase().includes(q);
+        const matchesNum = r.jerseyNumber?.toLowerCase().includes(q);
+        const matchesSupp = r.supplierName?.toLowerCase().includes(q);
+        const matchesSection = r.section?.toLowerCase().includes(q);
+        const matchesKind = getOrderItems(r).some((i) => i.kind.toLowerCase().includes(q));
+        if (!matchesRef && !matchesNum && !matchesSupp && !matchesSection && !matchesKind) return false;
+      }
+      if (sectionFilter === 'none') {
+        if (r.section && ALL_SECTIONS.includes(r.section)) return false;
+      } else if (sectionFilter !== 'all' && r.section !== sectionFilter) {
+        return false;
+      }
+      if (sizeFilter !== 'all' && !getOrderItems(r).some((i) => i.size === sizeFilter)) return false;
+      if (statusFilter !== 'all' && r.paymentStatus !== statusFilter) return false;
+      if (supplierFilter !== 'all' && r.supplierPaymentStatus !== supplierFilter) return false;
+      return true;
+    });
+  }, [currentJerseyOrders, searchTerm, sectionFilter, sizeFilter, statusFilter, supplierFilter]);
 
-  const updateItem = (id: string, patch: Partial<JerseyItem>) =>
-    setItems((prev) => prev.map((it) => (it.id === id ? { ...it, ...patch } : it)));
-
-  const itemsReady = !!counts && items.length === slots.length && items.length > 0;
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!memberRef.trim() || docBusy || !itemsReady) return;
-
-    const isNew = !recordToEdit;
-    const record: JerseyRecord = {
-      id: recordToEdit?.id || `jrs-${Date.now()}`,
-      jerseyType,
-      memberRef: memberRef.trim(),
-      section: section || undefined,
-      jerseyNumber: items.map((i) => (i.number || '').trim()).filter(Boolean).join(', ') || undefined,
-      jerseySize: (items[0]?.size || 'L') as JerseyRecord['jerseySize'],
-      items: items.map((i) => ({ ...i, number: (i.number || '').trim() || undefined })),
-      unitPrice: parsedPrice,
-      amountPaid: parsedPaid,
-      balance: calculatedBalance,
-      paymentStatus,
-      supplierPaymentStatus: supplierStatus,
-      supplierName: supplierName.trim() || undefined,
-      date,
-      documents,
-      createdAt: recordToEdit?.createdAt || new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    onSave(record, isNew, recordToEdit || undefined);
-    onClose();
-  };
-
-  const handleDelete = () => {
-    if (recordToEdit && onDelete) {
-      onDelete(recordToEdit.id, recordToEdit);
-      onClose();
-    }
-  };
-
-  const fieldClass =
-    'w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-800 dark:text-slate-200';
-  const labelClass =
-    'block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5';
+  const selectClass =
+    'px-2.5 py-1.5 text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-700 dark:text-slate-200';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-sm animate-fadeIn">
-      <div
-        className="w-full max-w-lg bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col max-h-[92vh]"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="bg-slate-900 text-white p-5 flex items-center justify-between border-b border-slate-800">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 flex items-center justify-center">
-              <Shirt className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-white">
-                {recordToEdit ? 'Edit Jersey Order Record' : 'Add Jersey Order Record'}
-              </h2>
-              <p className="text-xs text-slate-400">Track individual order payment and supplier status</p>
-            </div>
+    <div className="space-y-6 animate-fadeIn">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300">
+              JERSEY FUND DASHBOARD
+            </span>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg text-slate-400 hover:text-white">
-            <X className="w-5 h-5" />
-          </button>
+          <h2 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white mt-0.5">
+            {title}
+          </h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            {subtitle}
+          </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={labelClass}>Jersey Division</label>
-              <select
-                value={jerseyType}
-                onChange={(e) => setJerseyType(e.target.value as any)}
-                className={fieldClass}
-              >
-                <option value="batch_jersey">Batch Official Jersey</option>
-                <option value="mol_blue">MOL Blue & MMC White Jersey</option>
-                {jerseyType === 'mmc_white' && <option value="mmc_white">MMC White Jersey</option>}
-              </select>
-            </div>
+        {isAdmin && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => onOpenAddFinancial('collection')}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-sm transition-all"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Record Batch Payment</span>
+            </button>
+            <button
+              onClick={() => onOpenAddFinancial('expense')}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-sm transition-all"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Disburse to Supplier</span>
+            </button>
+            <button
+              onClick={onOpenAddOrder}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-sm transition-all"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Add Order Item</span>
+            </button>
+          </div>
+        )}
+      </div>
 
-            <div>
-              <label className={labelClass}>Member / Unit Reference Code</label>
-              <input
-                type="text"
-                required
-                value={memberRef}
-                onChange={(e) => setMemberRef(e.target.value)}
-                placeholder="Enter code or member reference"
-                className={`${fieldClass} font-mono`}
-              />
+      {/* Metric Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+        <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
+          <div className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
+            Total Jersey Collections
+          </div>
+          <div className="text-2xl font-black text-slate-900 dark:text-white mt-1 font-mono">
+            {peso(totalCollections)}
+          </div>
+          <div className="text-[11px] text-slate-400 mt-1">Total payments received</div>
+        </div>
+
+        <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
+          <div className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
+            Supplier Disbursements
+          </div>
+          <div className="text-2xl font-black text-rose-600 dark:text-rose-400 mt-1 font-mono">
+            {peso(totalSupplierDisbursed)}
+          </div>
+          <div className="text-[11px] text-slate-400 mt-1">Paid to manufacturer</div>
+        </div>
+
+        <div className="p-5 bg-emerald-50/70 dark:bg-emerald-950/30 rounded-2xl border border-emerald-200 dark:border-emerald-800/60 shadow-sm">
+          <div className="text-xs font-semibold uppercase text-emerald-800 dark:text-emerald-300">
+            Available Fund Balance
+          </div>
+          <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-1 font-mono">
+            {peso(availableFundBalance)}
+          </div>
+          <div className="text-[11px] text-emerald-700/80 dark:text-emerald-400/80 mt-1">
+            Collections minus expenses
+          </div>
+        </div>
+
+        <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
+          <div className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
+            Orders / Pending Receivables
+          </div>
+          <div className="text-xl font-bold text-slate-900 dark:text-white mt-1">
+            {totalPieces} Pieces <span className="text-xs font-medium text-slate-400">· {totalOrdersCount} orders</span>
+          </div>
+          <div className="text-[11px] font-mono text-amber-600 dark:text-amber-400 mt-1">
+            Pending dues: {peso(totalOutstandingMemberBalances)}
+          </div>
+        </div>
+      </div>
+
+      {/* Member payments summary (all orders, including unfinished payments) */}
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 sm:p-5">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <div>
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white">Member Payments Summary</h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Total paid across all orders, including orders that are not fully paid yet
+            </p>
+          </div>
+          <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+            {paymentSummary.pct}% collected
+          </span>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="p-3 rounded-xl border border-emerald-200 dark:border-emerald-800/60 bg-emerald-50/70 dark:bg-emerald-950/30">
+            <div className="text-[11px] font-semibold uppercase text-emerald-800 dark:text-emerald-300">Total Paid So Far</div>
+            <div className="text-lg font-black font-mono text-emerald-600 dark:text-emerald-400">{peso(paymentSummary.paid)}</div>
+          </div>
+          <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-700">
+            <div className="text-[11px] font-semibold uppercase text-slate-500 dark:text-slate-400">Total Expected</div>
+            <div className="text-lg font-black font-mono text-slate-900 dark:text-white">{peso(paymentSummary.expected)}</div>
+          </div>
+          <div className="p-3 rounded-xl border border-amber-200 dark:border-amber-800/60 bg-amber-50/60 dark:bg-amber-950/20">
+            <div className="text-[11px] font-semibold uppercase text-amber-800 dark:text-amber-300">Still To Collect</div>
+            <div className="text-lg font-black font-mono text-amber-600 dark:text-amber-400">{peso(paymentSummary.balance)}</div>
+          </div>
+          <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-700">
+            <div className="text-[11px] font-semibold uppercase text-slate-500 dark:text-slate-400">Orders</div>
+            <div className="text-xs font-semibold text-slate-900 dark:text-white mt-1">
+              <span className="text-emerald-600 dark:text-emerald-400">{paymentSummary.paidCount} paid</span>
+              {' · '}
+              <span className="text-amber-600 dark:text-amber-400">{paymentSummary.partialCount} partial</span>
+              {' · '}
+              <span className="text-rose-600 dark:text-rose-400">{paymentSummary.unpaidCount} unpaid</span>
             </div>
           </div>
+        </div>
 
-          <div>
-            <label className={labelClass}>Section</label>
-            <select
-              value={section}
-              onChange={(e) => setSection(e.target.value)}
-              required
-              className={`${fieldClass} font-bold`}
+        <div className="mt-3 h-2 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
+          <div className="h-full bg-emerald-500" style={{ width: `${paymentSummary.pct}%` }} />
+        </div>
+      </div>
+
+      {/* Orders per section */}
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 sm:p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-bold text-slate-900 dark:text-white">Orders per Section</h3>
+          {sectionFilter !== 'all' && (
+            <button
+              onClick={() => setSectionFilter('all')}
+              className="text-xs text-indigo-600 dark:text-indigo-300 hover:underline"
             >
-              <option value="">Select section</option>
+              Show all sections
+            </button>
+          )}
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {sectionSummary.rows.map((row) => (
+            <button
+              key={row.section}
+              onClick={() => setSectionFilter(sectionFilter === row.section ? 'all' : row.section)}
+              className={`text-left p-3 rounded-xl border transition-colors ${
+                sectionFilter === row.section
+                  ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950/40'
+                  : 'border-slate-200 dark:border-slate-700 hover:border-indigo-400'
+              }`}
+            >
+              <div className="text-xs font-bold font-mono text-slate-900 dark:text-white">{row.section}</div>
+              <div className="text-lg font-black text-slate-900 dark:text-white">{row.units} <span className="text-[11px] font-medium text-slate-400">pieces · {row.orders} orders</span></div>
+              <div className="text-[11px] font-mono text-emerald-600 dark:text-emerald-400">Paid {peso(row.paid)}</div>
+              <div className="text-[11px] font-mono text-amber-600 dark:text-amber-400">Due {peso(row.balance)}</div>
+            </button>
+          ))}
+        </div>
+        {sectionSummary.unassignedCount > 0 && (
+          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-3">
+            {sectionSummary.unassignedCount} order(s) have no section yet.
+          </p>
+        )}
+      </div>
+
+      {/* Supplier order summary */}
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-4 sm:p-5 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white">Supplier Order Summary</h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Pieces to order by item and size, counted from every order
+            </p>
+          </div>
+          <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+            {totalPieces} pieces · {supplierSummary.pairs} pairs · {supplierSummary.solos} solo
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs text-left">
+            <thead className="bg-slate-100/75 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold">
+              <tr>
+                <th className="py-2 px-3">Item</th>
+                {SIZES.map((sz) => (
+                  <th key={sz} className="py-2 px-3 text-center">{sz}</th>
+                ))}
+                <th className="py-2 px-3 text-center">Total</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+              {supplierSummary.allKinds.map((kind) => {
+                const rowTotal = SIZES.reduce((sum, sz) => sum + (supplierSummary.bySize[kind][sz] || 0), 0);
+                return (
+                  <tr key={kind}>
+                    <td className="py-2 px-3 font-semibold text-slate-900 dark:text-white whitespace-nowrap">{kind}</td>
+                    {SIZES.map((sz) => (
+                      <td key={sz} className="py-2 px-3 text-center font-mono text-slate-700 dark:text-slate-300">
+                        {supplierSummary.bySize[kind][sz] || '—'}
+                      </td>
+                    ))}
+                    <td className="py-2 px-3 text-center font-mono font-bold text-slate-900 dark:text-white">{rowTotal}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs text-left">
+            <thead className="bg-slate-100/75 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold">
+              <tr>
+                <th className="py-2 px-3">Section</th>
+                {supplierSummary.allKinds.map((kind) => (
+                  <th key={kind} className="py-2 px-3 text-center whitespace-nowrap">{kind}</th>
+                ))}
+                <th className="py-2 px-3 text-center">Pieces</th>
+                <th className="py-2 px-3 text-center">Pairs</th>
+                <th className="py-2 px-3 text-center">Solo</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+              {supplierSummary.secRows.map((row) => (
+                <tr key={row.section}>
+                  <td className="py-2 px-3 font-mono font-bold text-slate-900 dark:text-white">{row.section}</td>
+                  {supplierSummary.allKinds.map((kind) => (
+                    <td key={kind} className="py-2 px-3 text-center font-mono text-slate-700 dark:text-slate-300">
+                      {row.byKind[kind] || '—'}
+                    </td>
+                  ))}
+                  <td className="py-2 px-3 text-center font-mono font-bold text-slate-900 dark:text-white">{row.pieces}</td>
+                  <td className="py-2 px-3 text-center font-mono">{row.pairs}</td>
+                  <td className="py-2 px-3 text-center font-mono">{row.solos}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Jersey Order Roster Table */}
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+        <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 bg-slate-50/50 dark:bg-slate-800/20">
+          <div className="relative flex-1">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search member ref, section, jersey number, or supplier..."
+              className="w-full pl-9 pr-4 py-2 text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 dark:text-slate-200"
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <select value={sectionFilter} onChange={(e) => setSectionFilter(e.target.value)} className={selectClass}>
+              <option value="all">All Sections</option>
               {SECTION_GROUPS.map((g) => (
                 <optgroup key={g.label} label={g.label}>
                   {g.sections.map((s) => (
@@ -342,260 +486,253 @@ export const JerseyFormModal: React.FC<JerseyFormModalProps> = ({
                   ))}
                 </optgroup>
               ))}
+              <option value="none">No section</option>
+            </select>
+
+            <select value={sizeFilter} onChange={(e) => setSizeFilter(e.target.value)} className={selectClass}>
+              <option value="all">All Sizes</option>
+              <option value="XS">XS</option>
+              <option value="S">S</option>
+              <option value="M">M</option>
+              <option value="L">L</option>
+              <option value="XL">XL</option>
+              <option value="2XL">2XL</option>
+              <option value="3XL">3XL</option>
+            </select>
+
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className={selectClass}>
+              <option value="all">All Payment Statuses</option>
+              <option value="Paid">Paid</option>
+              <option value="Partially Paid">Partially Paid</option>
+              <option value="Unpaid">Unpaid</option>
+            </select>
+
+            <select value={supplierFilter} onChange={(e) => setSupplierFilter(e.target.value)} className={selectClass}>
+              <option value="all">All Supplier Statuses</option>
+              <option value="Completed">Supplier: Completed</option>
+              <option value="Pending">Supplier: Pending</option>
             </select>
           </div>
+        </div>
 
-          {/* Order total decides the pairs and solos */}
-          <div className="rounded-xl border border-indigo-200 dark:border-indigo-900 bg-indigo-50/40 dark:bg-indigo-950/20 p-3 space-y-2">
-            <label className={labelClass}>Order Total Price (decides pairs and solos)</label>
-            <input
-              type="number"
-              step="0.01"
-              required
-              value={unitPrice}
-              onChange={(e) => setUnitPrice(e.target.value)}
-              placeholder={`${SOLO_PRICE} = solo, ${PAIR_PRICE} = pair`}
-              className={`${fieldClass} font-mono`}
-            />
-            {counts ? (
-              <p className="text-xs font-semibold text-indigo-700 dark:text-indigo-300">
-                {describeCounts(counts)} · {piecesFor(counts)} piece{piecesFor(counts) === 1 ? '' : 's'}
-              </p>
-            ) : priceInvalid ? (
-              <p className="text-xs font-semibold text-rose-500">
-                ₱{parsedPrice.toFixed(2)} does not match any order. Use ₱{PAIR_PRICE} for each pair and ₱{SOLO_PRICE} for each
-                solo (for example ₱{SOLO_PRICE}, ₱{PAIR_PRICE}, ₱{PAIR_PRICE + SOLO_PRICE}, ₱{PAIR_PRICE * 2}).
-              </p>
-            ) : (
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                Enter the full price of the order. ₱{SOLO_PRICE} is a solo, ₱{PAIR_PRICE} is a pair, ₱{PAIR_PRICE + SOLO_PRICE} is a
-                pair + a solo.
-              </p>
-            )}
-          </div>
-
-          {/* Pieces in this order */}
-          {counts && (
-            <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 space-y-2">
-              <span className="text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                Pieces in this order
-              </span>
-
-              {itemsReady &&
-                items.map((it, idx) => {
-                  const slot = slots[idx];
-                  const locked = !!slot?.fixedKind;
-                  return (
-                    <div key={it.id} className="grid grid-cols-12 gap-2 items-center">
-                      <span className="col-span-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-                        {slot?.label}
-                      </span>
-                      {locked ? (
-                        <div className={`${fieldClass} col-span-5 font-semibold`}>{it.kind}</div>
+        {/* Table */}
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs text-left">
+            <thead className="bg-slate-100/75 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold border-b border-slate-200 dark:border-slate-700">
+              <tr>
+                <th className="py-3 px-4">Member / Unit Code</th>
+                <th className="py-3 px-4 text-center">Section</th>
+                <th className="py-3 px-4">Items</th>
+                <th className="py-3 px-4 text-right">Price</th>
+                <th className="py-3 px-4 text-right">Paid</th>
+                <th className="py-3 px-4 text-right">Balance Due</th>
+                <th className="py-3 px-4 text-center">Payment Status</th>
+                <th className="py-3 px-4 text-center">Supplier Status</th>
+                <th className="py-3 px-4">Manufacturer</th>
+                <th className="py-3 px-4 text-center">Proof</th>
+                {isAdmin && <th className="py-3 px-4 text-right">Admin Actions</th>}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+              {filteredOrders.length > 0 ? (
+                filteredOrders.map((order) => (
+                  <tr key={order.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                    <td className="py-3 px-4 font-mono font-bold text-slate-900 dark:text-white whitespace-nowrap">
+                      {order.memberRef}
+                    </td>
+                    <td className="py-3 px-4 text-center whitespace-nowrap">
+                      {order.section ? (
+                        <span className="px-2 py-0.5 rounded font-mono font-semibold bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300">
+                          {order.section}
+                        </span>
                       ) : (
-                        <select
-                          value={it.kind}
-                          onChange={(e) => updateItem(it.id, { kind: e.target.value })}
-                          className={`${fieldClass} col-span-5`}
-                        >
-                          {(kindOptions.includes(it.kind) ? kindOptions : [...kindOptions, it.kind]).map((k) => (
-                            <option key={k} value={k}>
-                              {k}
-                            </option>
-                          ))}
-                        </select>
+                        <span className="text-slate-400">—</span>
                       )}
-                      <select
-                        value={it.size}
-                        onChange={(e) => updateItem(it.id, { size: e.target.value })}
-                        className={`${fieldClass} col-span-2 font-bold`}
-                      >
-                        {SIZES.map((sz) => (
-                          <option key={sz} value={sz}>
-                            {sz}
-                          </option>
-                        ))}
-                      </select>
-                      <input
-                        type="text"
-                        value={it.number || ''}
-                        onChange={(e) => updateItem(it.id, { number: e.target.value })}
-                        placeholder="No."
-                        className={`${fieldClass} col-span-3 font-mono`}
-                      />
-                    </div>
-                  );
-                })}
+                    </td>
+                    <td className="py-3 px-4 min-w-[220px]">
+                      <div className="font-semibold text-slate-900 dark:text-white">
+                        {describeOrder(order)}
+                      </div>
+                      <div className="text-slate-500 dark:text-slate-400">
+                        {getOrderItems(order)
+                          .map((i) => `${i.kind} (${i.size}${i.number ? ' #' + i.number : ''})`)
+                          .join(' + ')}
+                      </div>
+                    </td>
+                    <td className="py-3 px-4 text-right font-mono">₱{order.unitPrice.toFixed(2)}</td>
+                    <td className="py-3 px-4 text-right font-mono text-emerald-600 dark:text-emerald-400 font-semibold">
+                      ₱{order.amountPaid.toFixed(2)}
+                    </td>
+                    <td className="py-3 px-4 text-right font-mono font-bold">
+                      <span className={order.balance > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400'}>
+                        ₱{order.balance.toFixed(2)}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4 text-center whitespace-nowrap">
+                      {isAdmin ? (
+                        <select
+                          value={order.paymentStatus}
+                          onChange={(e) => onQuickUpdateStatus(order.id, e.target.value as any)}
+                          className="px-2 py-0.5 text-[11px] font-semibold rounded-full border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 cursor-pointer"
+                        >
+                          <option value="Paid">Paid</option>
+                          <option value="Partially Paid">Partially Paid</option>
+                          <option value="Unpaid">Unpaid</option>
+                        </select>
+                      ) : (
+                        <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${
+                          order.paymentStatus === 'Paid'
+                            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                            : order.paymentStatus === 'Partially Paid'
+                            ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                            : 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+                        }`}>
+                          {order.paymentStatus}
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-3 px-4 text-center whitespace-nowrap">
+                      {isAdmin ? (
+                        <select
+                          value={order.supplierPaymentStatus}
+                          onChange={(e) => onQuickUpdateSupplier(order.id, e.target.value as any)}
+                          className="px-2 py-0.5 text-[11px] font-semibold rounded-full border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 cursor-pointer"
+                        >
+                          <option value="Completed">Completed</option>
+                          <option value="Pending">Pending</option>
+                        </select>
+                      ) : (
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                          order.supplierPaymentStatus === 'Completed'
+                            ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300'
+                            : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                        }`}>
+                          {order.supplierPaymentStatus}
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-3 px-4 text-slate-600 dark:text-slate-400 whitespace-nowrap">
+                      {order.supplierName || '—'}
+                    </td>
+                    <td className="py-3 px-4 text-center whitespace-nowrap">
+                      {order.documents && order.documents.length > 0 ? (
+                        <button
+                          onClick={() =>
+                            onViewDocument(order.documents[0], `Order ${order.memberRef}`, order.documents)
+                          }
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100"
+                          title="View attached proof"
+                        >
+                          <Paperclip className="w-3 h-3" />
+                          {order.documents.length}
+                        </button>
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
+                    </td>
+                    {isAdmin && (
+                      <td className="py-3 px-4 text-right whitespace-nowrap">
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            onClick={() => onEditJersey(order)}
+                            className="p-1.5 text-slate-400 hover:text-indigo-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+                            title="Edit"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => onDeleteJersey(order.id, order)}
+                            className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+                            title="Delete"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={isAdmin ? 11 : 10} className="py-8 text-center text-slate-500 text-xs">
+                    No jersey records found for this filter.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
 
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                {isPairedType(jerseyType)
-                  ? 'Each pair is 1 MOL Blue + 1 MMC White. A solo can be either shirt.'
-                  : 'A pair is any two pieces (shirt + short, or 2 shirts). A solo is one shirt or one short.'}
-              </p>
-            </div>
-          )}
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={labelClass}>Amount Paid</label>
-              <input
-                type="number"
-                step="0.01"
-                required
-                value={amountPaid}
-                onChange={(e) => handlePaidChange(e.target.value)}
-                className={`${fieldClass} font-mono`}
-              />
-            </div>
-
-            <div>
-              <label className={labelClass}>Balance Due</label>
-              <div className="w-full px-3 py-2 text-xs bg-slate-100 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white font-mono font-bold flex items-center">
-                ₱{calculatedBalance.toFixed(2)}
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={labelClass}>Member Payment Status</label>
-              <select
-                value={paymentStatus}
-                onChange={(e) => setPaymentStatus(e.target.value as any)}
-                className={fieldClass}
-              >
-                <option value="Paid">Paid</option>
-                <option value="Partially Paid">Partially Paid</option>
-                <option value="Unpaid">Unpaid</option>
-              </select>
-            </div>
-
-            <div>
-              <label className={labelClass}>Supplier Payment Status</label>
-              <select
-                value={supplierStatus}
-                onChange={(e) => setSupplierStatus(e.target.value as any)}
-                className={fieldClass}
-              >
-                <option value="Completed">Completed (Disbursed)</option>
-                <option value="Pending">Pending (Unpaid)</option>
-              </select>
-            </div>
-          </div>
-
-          <div>
-            <label className={labelClass}>Apparel Manufacturer / Supplier</label>
-            <input
-              type="text"
-              value={supplierName}
-              onChange={(e) => setSupplierName(e.target.value)}
-              placeholder="Enter supplier name"
-              className={fieldClass}
-            />
-          </div>
-
-          {/* Supporting documents */}
-          <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 space-y-3">
-            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
-              <Paperclip className="w-3.5 h-3.5" />
-              Supporting Documents
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <select value={docType} onChange={(e) => setDocType(e.target.value)} className={fieldClass}>
-                {DOC_TYPES.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-              <label className="px-3 py-2 text-xs text-center font-medium rounded-xl border border-dashed border-indigo-400 text-indigo-600 dark:text-indigo-300 cursor-pointer hover:bg-indigo-50 dark:hover:bg-indigo-950/30">
-                {docBusy ? 'Processing...' : 'Choose file'}
-                <input
-                  type="file"
-                  accept="image/*,application/pdf"
-                  multiple
-                  onChange={handleFiles}
-                  disabled={docBusy}
-                  className="hidden"
-                />
-              </label>
-            </div>
-
-            {docError && <p className="text-xs text-rose-500">{docError}</p>}
-
-            {documents.length > 0 ? (
-              <ul className="space-y-1.5">
-                {documents.map((d) => (
-                  <li
-                    key={d.id}
-                    className="flex items-center justify-between gap-2 px-2.5 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
-                  >
-                    <span className="truncate text-slate-700 dark:text-slate-200">
-                      {d.name} <span className="text-slate-400">· {d.type} · {d.size}</span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => removeDocument(d.id)}
-                      className="text-rose-500 hover:text-rose-600 flex-shrink-0"
-                      title="Remove attachment"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="text-xs text-slate-400">No documents attached yet.</p>
-            )}
-            <p className="text-[11px] text-slate-400">
-              Photos are shrunk automatically. Attachments are saved when you click Save.
-            </p>
-          </div>
-
-          {/* Delete prompt */}
-          {showDeleteConfirm && (
-            <div className="p-3 bg-rose-50 dark:bg-rose-950/40 rounded-xl border border-rose-200 dark:border-rose-900 text-xs space-y-2">
-              <div className="text-rose-700 dark:text-rose-300 font-semibold">Confirm Deletion</div>
-              <p className="text-rose-600 dark:text-rose-400">Permanently delete jersey record {memberRef}?</p>
-              <div className="flex justify-end gap-2">
-                <button type="button" onClick={() => setShowDeleteConfirm(false)} className="px-2.5 py-1 bg-white dark:bg-slate-800 rounded border">
-                  Cancel
-                </button>
-                <button type="button" onClick={handleDelete} className="px-2.5 py-1 bg-rose-600 text-white rounded">
-                  Delete
-                </button>
-              </div>
-            </div>
-          )}
-
-          <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between">
-            {recordToEdit && onDelete && !showDeleteConfirm ? (
-              <button
-                type="button"
-                onClick={() => setShowDeleteConfirm(true)}
-                className="text-rose-600 hover:text-rose-700 text-xs font-medium"
-              >
-                Delete Order
-              </button>
-            ) : (
-              <div />
-            )}
-
-            <div className="flex gap-2">
-              <button type="button" onClick={onClose} className="px-4 py-2 text-xs text-slate-600">
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={docBusy || !itemsReady}
-                className="px-5 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 rounded-xl"
-              >
-                {recordToEdit ? 'Save Changes' : 'Create Jersey Order'}
-              </button>
-            </div>
-          </div>
-        </form>
+      {/* Payment & Disbursement Records */}
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+        <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/20">
+          <h3 className="text-sm font-bold text-slate-900 dark:text-white">Batch Payments & Supplier Disbursements</h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400">Records that feed the totals above</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs text-left">
+            <thead className="bg-slate-100/75 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold border-b border-slate-200 dark:border-slate-700">
+              <tr>
+                <th className="py-3 px-4">Date</th>
+                <th className="py-3 px-4">Type</th>
+                <th className="py-3 px-4">Description</th>
+                <th className="py-3 px-4">Source / Payee</th>
+                <th className="py-3 px-4 text-right">Amount</th>
+                {isAdmin && <th className="py-3 px-4 text-right">Admin Actions</th>}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+              {currentFinRecords.length > 0 ? (
+                currentFinRecords.map((rec) => (
+                  <tr key={rec.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                    <td className="py-3 px-4 whitespace-nowrap text-slate-600 dark:text-slate-400">{rec.date}</td>
+                    <td className="py-3 px-4 whitespace-nowrap">
+                      <span className={rec.type === 'collection' ? 'text-emerald-600 font-semibold' : 'text-rose-600 font-semibold'}>
+                        {rec.type === 'collection' ? 'Payment received' : 'Supplier disbursement'}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4 font-semibold text-slate-900 dark:text-white">{rec.title}</td>
+                    <td className="py-3 px-4 text-slate-700 dark:text-slate-300">{rec.sourceOrPayee}</td>
+                    <td className="py-3 px-4 text-right font-mono font-bold">
+                      <span className={rec.type === 'collection' ? 'text-emerald-600' : 'text-rose-600'}>
+                        {rec.type === 'collection' ? '+' : '-'}{peso(rec.amount)}
+                      </span>
+                    </td>
+                    {isAdmin && (
+                      <td className="py-3 px-4 text-right whitespace-nowrap">
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            onClick={() => onEditFinancial(rec)}
+                            className="p-1.5 text-slate-400 hover:text-indigo-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+                            title="Edit"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (window.confirm('Delete this record?')) onDeleteFinancial(rec.id, rec);
+                            }}
+                            className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+                            title="Delete"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={isAdmin ? 6 : 5} className="py-8 text-center text-slate-500 text-xs">
+                    No payment or disbursement records yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
